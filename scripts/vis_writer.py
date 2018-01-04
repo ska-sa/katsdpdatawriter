@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-"""Capture L0 visibilities from a SPEAD stream and write to HDF5 file. When
-the file is closed, metadata is also extracted from the telescope state and
-written to the file. This process lives across multiple observations and
-hence multiple HDF5 files.
+"""Capture L0 visibilities from a SPEAD stream and write to Ceph object store.
+
+This process lives across multiple observations and hence multiple data sets.
+It writes weights and flags as well.
 
 The status sensor has the following states:
 
@@ -14,9 +14,7 @@ The status sensor has the following states:
 """
 
 from __future__ import print_function, division
-import spead2
-import spead2.recv
-import katsdptelstate
+
 import time
 import os.path
 import os
@@ -24,14 +22,17 @@ import sys
 import threading
 import logging
 import Queue
-import numpy as np
 import signal
+
+import numpy as np
 import manhole
-import netifaces
-import concurrent.futures
+import spead2
+import spead2.recv
+import katsdptelstate
+import katsdpservices
 from katcp import DeviceServer, Sensor
 from katcp.kattypes import request, return_reply, Str
-import katsdpservices
+
 from katsdpfilewriter import telescope_model, ar1_model, file_writer
 
 
@@ -41,13 +42,13 @@ FREE_DISK_THRESHOLD_STOP = 2 * 1024**3
 FREE_DISK_THRESHOLD_START = 3 * 1024**3
 
 
-class FileWriterServer(DeviceServer):
-    VERSION_INFO = ("sdp-file-writer", 0, 1)
-    BUILD_INFO = ("sdp-file-writer", 0, 1, "rc1")
+class VisibilityWriterServer(DeviceServer):
+    VERSION_INFO = ("sdp-vis-writer", 0, 1)
+    BUILD_INFO = ("sdp-vis-writer", 0, 1, "rc1")
 
     def __init__(self, logger, l0_endpoints, l0_interface, l0_name,
                  file_base, telstate, *args, **kwargs):
-        super(FileWriterServer, self).__init__(*args, logger=logger, **kwargs)
+        super(VisibilityWriterServer, self).__init__(*args, logger=logger, **kwargs)
         self._file_base = file_base
         self._endpoints = l0_endpoints
         self._stream_name = l0_name
@@ -72,28 +73,34 @@ class FileWriterServer(DeviceServer):
 
     def setup_sensors(self):
         self._status_sensor = Sensor.string(
-                "status", "The current status of the capture process", "", "idle")
+            "status", "The current status of the capture process", "", "idle")
         self.add_sensor(self._status_sensor)
         self._device_status_sensor = Sensor.string(
-                "device-status", "Health sensor", "", "ok")
+            "device-status", "Health sensor", "", "ok")
         self.add_sensor(self._device_status_sensor)
         self._filename_sensor = Sensor.string(
-                "filename", "Final name for file being captured", "")
+            "filename", "Final name for file being captured", "")
         self.add_sensor(self._filename_sensor)
         self._input_dumps_sensor = Sensor.integer(
-                "input-dumps-total", "Number of (possibly partial) input dumps captured in this session.", "", default=0)
+            "input-dumps-total",
+            "Number of (possibly partial) input dumps captured in this session.",
+            "", default=0)
         self.add_sensor(self._input_dumps_sensor)
         self._input_heaps_sensor = Sensor.integer(
-                "input-heaps-total", "Number of input heaps captured in this session.", "", default=0)
+            "input-heaps-total",
+            "Number of input heaps captured in this session.", "", default=0)
         self.add_sensor(self._input_heaps_sensor)
         self._input_incomplete_heaps_sensor = Sensor.integer(
-                "input-incomplete-heaps-total", "Number of incomplete heaps that were dropped.", "", default=0)
+            "input-incomplete-heaps-total",
+            "Number of incomplete heaps that were dropped.", "", default=0)
         self.add_sensor(self._input_incomplete_heaps_sensor)
         self._input_bytes_sensor = Sensor.integer(
-                "input-bytes-total", "Number of payload bytes received in this session.", "B", default=0)
+            "input-bytes-total",
+            "Number of payload bytes received in this session.", "B", default=0)
         self.add_sensor(self._input_bytes_sensor)
         self._disk_free_sensor = Sensor.float(
-                "disk-free", "Free disk space in bytes on target device for this file.", "B")
+            "disk-free",
+            "Free disk space in bytes on target device for this file.", "B")
         self.add_sensor(self._disk_free_sensor)
 
     def _do_capture(self, file_obj):
@@ -115,7 +122,6 @@ class FileWriterServer(DeviceServer):
         self._input_heaps_sensor.set_value(n_heaps)
         self._input_bytes_sensor.set_value(n_bytes)
         self._input_incomplete_heaps_sensor.set_value(n_incomplete_heaps)
-        loop_time = time.time()
         free_space = file_obj.free_space()
         self._disk_free_sensor.set_value(free_space)
         # status to report once the capture stops
@@ -219,7 +225,7 @@ class FileWriterServer(DeviceServer):
             free_space = stat.f_bsize * stat.f_bavail
             if free_space < FREE_DISK_THRESHOLD_START:
                 self._logger.error("Insufficient disk space to start capture (%d < %d)",
-                                  free_space, FREE_DISK_THRESHOLD_START)
+                                   free_space, FREE_DISK_THRESHOLD_START)
                 self._device_status_sensor.set_value("fail", "error")
                 return ("fail", "Disk too full (only {:.2f} GiB free)".format(free_space / 1024**3))
         self._device_status_sensor.set_value("ok")
@@ -235,7 +241,6 @@ class FileWriterServer(DeviceServer):
             n_bls = self._telstate_l0['n_bls']
         except KeyError as error:
             self._logger.error('Missing telescope state key: %s', error)
-            end_status = 'bad-telstate'
             return ("fail", "Missing telescope state key: {}".format(error))
         self._file_obj = file_writer.File(self._stage_filename, self._stream_name)
         self._file_obj.create_data((n_chans, n_bls))
@@ -244,9 +249,11 @@ class FileWriterServer(DeviceServer):
         l0_heap_size = n_bls * n_chans_per_substream * 10 + n_chans_per_substream * 4
         n_substreams = n_chans // n_chans_per_substream
         self._rx = spead2.recv.Stream(spead2.ThreadPool(),
-                                      max_heaps=2 * n_substreams, ring_heaps=2 * n_substreams,
+                                      max_heaps=2 * n_substreams,
+                                      ring_heaps=2 * n_substreams,
                                       contiguous_only=False)
-        memory_pool = spead2.MemoryPool(l0_heap_size, l0_heap_size+4096, 8 * n_substreams, 8 * n_substreams)
+        memory_pool = spead2.MemoryPool(l0_heap_size, l0_heap_size + 4096,
+                                        8 * n_substreams, 8 * n_substreams)
         self._rx.set_memory_pool(memory_pool)
         self._rx.stop_on_stop_item = False
         for endpoint in self._endpoints:
@@ -305,12 +312,14 @@ class FileWriterServer(DeviceServer):
             os.rename(self._stage_filename, self._final_filename)
             result = ("ok", "File renamed to {0}".format(self._final_filename))
         except OSError as e:
-            logger.error("Failed to rename output file %s to %s",
-                         self._stage_filename, self._final_filename, exc_info=True)
-            result = ("fail", "Failed to rename output file from {0} to {1}.".format(
-                self._stage_filename, self._final_filename))
+            self._logger.exception("Failed to rename output file %s to %s",
+                                   self._stage_filename, self._final_filename)
+            result = ("fail",
+                      "Failed to rename output file from {0} to {1}."
+                      .format(self._stage_filename, self._final_filename))
         self._status_sensor.set_value("idle")
         return result
+
 
 def comma_list(type_):
     """Return a function which splits a string on commas and converts each element to
@@ -320,19 +329,31 @@ def comma_list(type_):
         return [type_(x) for x in arg.split(',')]
     return convert
 
-def main():
+
+if __name__ == '__main__':
     katsdpservices.setup_logging()
     logger = logging.getLogger("katsdpfilewriter")
     logging.getLogger('spead2').setLevel(logging.WARNING)
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    parser.add_argument('--l0-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7200), default=':7200', help='source port/multicast groups for spectral L0 input. [default=%(default)s]', metavar='ENDPOINTS')
-    parser.add_argument('--l0-interface', help='interface to subscribe to for L0 data. [default=auto]', metavar='INTERFACE')
-    parser.add_argument('--l0-name', default='sdp_l0', help='telstate prefix for L0 metadata. [default=%(default)s]', metavar='NAME')
-    parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files. [default=%(default)s]', metavar='DIR')
-    parser.add_argument('-p', '--port', dest='port', type=int, default=2046, metavar='N', help='katcp host port. [default=%(default)s]')
-    parser.add_argument('-a', '--host', dest='host', type=str, default="", metavar='HOST', help='katcp host address. [default=all hosts]')
+    parser.add_argument('--l0-spead', default=':7200',
+                        type=katsdptelstate.endpoint.endpoint_list_parser(7200),
+                        help='source port/multicast groups for spectral L0 input. [default=%(default)s]',
+                        metavar='ENDPOINTS')
+    parser.add_argument('--l0-interface',
+                        help='interface to subscribe to for L0 data. [default=auto]',
+                        metavar='INTERFACE')
+    parser.add_argument('--l0-name', default='sdp_l0',
+                        help='telstate prefix for L0 metadata. [default=%(default)s]',
+                        metavar='NAME')
+    parser.add_argument('--file-base', default='.', type=str,
+                        help='base directory into which to write HDF5 files. [default=%(default)s]',
+                        metavar='DIR')
+    parser.add_argument('-p', '--port', dest='port', type=int, default=2046,
+                        metavar='N', help='katcp host port. [default=%(default)s]')
+    parser.add_argument('-a', '--host', dest='host', type=str, default="",
+                        metavar='HOST', help='katcp host address. [default=all hosts]')
     parser.set_defaults(telstate='localhost')
     args = parser.parse_args()
     if not os.access(args.file_base, os.W_OK):
@@ -340,27 +361,26 @@ def main():
         sys.exit(1)
 
     restart_queue = Queue.Queue()
-    server = FileWriterServer(logger, args.l0_spead, args.l0_interface, args.l0_name,
-                              args.file_base, args.telstate,
-                              host=args.host, port=args.port)
+    server = VisibilityWriterServer(logger, args.l0_spead, args.l0_interface,
+                                    args.l0_name, args.file_base, args.telstate,
+                                    host=args.host, port=args.port)
     server.set_restart_queue(restart_queue)
     server.start()
     logger.info("Started file writer server.")
 
-
-    manhole.install(oneshot_on='USR1', locals={'server':server, 'args':args})
-     # allow remote debug connections and expose server and args
+    # allow remote debug connections and expose server and args
+    manhole.install(oneshot_on='USR1', locals={'server': server, 'args': args})
 
     def graceful_exit(_signo=None, _stack_frame=None):
         logger.info("Exiting filewriter on SIGTERM")
+        # rely on the interrupt handler around the katcp device server
+        # to peform graceful shutdown. this preserves the command
+        # line Ctrl-C shutdown.
         os.kill(os.getpid(), signal.SIGINT)
-         # rely on the interrupt handler around the katcp device server
-         # to peform graceful shutdown. this preserves the command
-         # line Ctrl-C shutdown.
 
+    # mostly needed for Docker use since this process runs as PID 1
+    # and does not get passed sigterm unless it has a custom listener
     signal.signal(signal.SIGTERM, graceful_exit)
-     # mostly needed for Docker use since this process runs as PID 1
-     # and does not get passed sigterm unless it has a custom listener
 
     try:
         while True:
@@ -382,6 +402,3 @@ def main():
         server.capture_done()
         server.stop()
         server.join()
-
-if __name__ == '__main__':
-    main()
