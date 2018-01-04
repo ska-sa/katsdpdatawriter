@@ -18,7 +18,6 @@ from __future__ import print_function, division
 import time
 import os.path
 import os
-import sys
 import threading
 import logging
 import Queue
@@ -33,8 +32,6 @@ import katsdpservices
 from katcp import DeviceServer, Sensor
 from katcp.kattypes import request, return_reply, Str
 
-from katsdpfilewriter import telescope_model, ar1_model, file_writer
-
 
 #: Bytes free at which a running capture will be stopped
 FREE_DISK_THRESHOLD_STOP = 2 * 1024**3
@@ -47,9 +44,9 @@ class VisibilityWriterServer(DeviceServer):
     BUILD_INFO = ("sdp-vis-writer", 0, 1, "rc1")
 
     def __init__(self, logger, l0_endpoints, l0_interface, l0_name,
-                 file_base, telstate, *args, **kwargs):
+                 ceph_pool, telstate, *args, **kwargs):
         super(VisibilityWriterServer, self).__init__(*args, logger=logger, **kwargs)
-        self._file_base = file_base
+        self._ceph_pool = ceph_pool
         self._endpoints = l0_endpoints
         self._stream_name = l0_name
         self._interface_address = katsdpservices.get_interface_address(l0_interface)
@@ -57,19 +54,9 @@ class VisibilityWriterServer(DeviceServer):
         #: Signalled when about to stop the thread. Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
         self._telstate_l0 = telstate.view(l0_name)
-        self._model = ar1_model.create_model(antenna_mask=self.get_antenna_mask())
         self._file_obj = None
         self._start_timestamp = None
         self._rx = None
-
-    def get_antenna_mask(self):
-        """Extract list of antennas from baseline list"""
-        antennas = set()
-        bls_ordering = self._telstate_l0['bls_ordering']
-        for a, b in bls_ordering:
-            antennas.add(a[:-1])
-            antennas.add(b[:-1])
-        return sorted(antennas)
 
     def setup_sensors(self):
         self._status_sensor = Sensor.string(
@@ -104,8 +91,9 @@ class VisibilityWriterServer(DeviceServer):
         self.add_sensor(self._disk_free_sensor)
 
     def _do_capture(self, file_obj):
-        """Capture a stream from SPEAD and write to file. This is run in a
-        separate thread.
+        """Capture a stream from SPEAD and write to object store.
+
+        This is run in a separate thread.
 
         Parameters
         ----------
@@ -208,15 +196,15 @@ class VisibilityWriterServer(DeviceServer):
     @request(Str(optional=True))
     @return_reply(Str())
     def request_capture_init(self, req, capture_block_id=None):
-        """Start listening for L0 data and write it to HDF5 file."""
+        """Start listening for L0 data in a separate capture thread."""
         if self._capture_thread is not None:
             self._logger.info("Ignoring capture_init because already capturing")
             return ("fail", "Already capturing")
         timestamp = time.time()
         self._final_filename = os.path.join(
-                self._file_base, "{0}.h5".format(int(timestamp)))
+                self._ceph_pool, "{0}.h5".format(int(timestamp)))
         self._stage_filename = os.path.join(
-                self._file_base, "{0}.writing.h5".format(int(timestamp)))
+                self._ceph_pool, "{0}.writing.h5".format(int(timestamp)))
         try:
             stat = os.statvfs(os.path.dirname(self._stage_filename))
         except OSError:
@@ -242,7 +230,7 @@ class VisibilityWriterServer(DeviceServer):
         except KeyError as error:
             self._logger.error('Missing telescope state key: %s', error)
             return ("fail", "Missing telescope state key: {}".format(error))
-        self._file_obj = file_writer.File(self._stage_filename, self._stream_name)
+        # self._file_obj = file_writer.File(self._stage_filename, self._stream_name)
         self._file_obj.create_data((n_chans, n_bls))
 
         # 10 bytes per visibility: 8 for visibility, 1 for flags, 1 for weights; plus weights_channel
@@ -276,14 +264,15 @@ class VisibilityWriterServer(DeviceServer):
     @request()
     @return_reply(Str())
     def request_capture_done(self, req):
-        """Stop capturing and close the HDF5 file, if it is not already done."""
+        """Stop capturing, which cleans up the capturing thread."""
         if self._capture_thread is None:
             self._logger.info("Ignoring capture_done because already explicitly stopped")
         return self.capture_done()
 
     def capture_done(self):
-        """Implementation of :meth:`request_capture_done`, split out to allow it
-        to be called on `KeyboardInterrupt`.
+        """Implementation of :meth:`request_capture_done`.
+
+        This is split out to allow it to be called on `KeyboardInterrupt`.
         """
         if self._capture_thread is None:
             return ("fail", "Not capturing")
@@ -300,9 +289,6 @@ class VisibilityWriterServer(DeviceServer):
         self._logger.info("Joined capture thread")
 
         self._status_sensor.set_value("finalising")
-        self._file_obj.set_metadata(telescope_model.TelstateModelData(
-                self._model, self._telstate_l0.root(), self._start_timestamp))
-        self._file_obj.close()
         self._file_obj = None
         self._start_timestamp = None
         self._logger.info("Finalised file")
@@ -319,15 +305,6 @@ class VisibilityWriterServer(DeviceServer):
                       .format(self._stage_filename, self._final_filename))
         self._status_sensor.set_value("idle")
         return result
-
-
-def comma_list(type_):
-    """Return a function which splits a string on commas and converts each element to
-    `type_`."""
-
-    def convert(arg):
-        return [type_(x) for x in arg.split(',')]
-    return convert
 
 
 if __name__ == '__main__':
@@ -347,32 +324,29 @@ if __name__ == '__main__':
     parser.add_argument('--l0-name', default='sdp_l0',
                         help='telstate prefix for L0 metadata. [default=%(default)s]',
                         metavar='NAME')
-    parser.add_argument('--file-base', default='.', type=str,
-                        help='base directory into which to write HDF5 files. [default=%(default)s]',
-                        metavar='DIR')
+    parser.add_argument('--ceph-pool', default='data_vis', type=str,
+                        help='Name of Ceph pool. [default=%(default)s]',
+                        metavar='POOL')
     parser.add_argument('-p', '--port', dest='port', type=int, default=2046,
                         metavar='N', help='katcp host port. [default=%(default)s]')
     parser.add_argument('-a', '--host', dest='host', type=str, default="",
                         metavar='HOST', help='katcp host address. [default=all hosts]')
     parser.set_defaults(telstate='localhost')
     args = parser.parse_args()
-    if not os.access(args.file_base, os.W_OK):
-        logger.error('Target directory (%s) is not writable', args.file_base)
-        sys.exit(1)
 
     restart_queue = Queue.Queue()
     server = VisibilityWriterServer(logger, args.l0_spead, args.l0_interface,
-                                    args.l0_name, args.file_base, args.telstate,
+                                    args.l0_name, args.ceph_pool, args.telstate,
                                     host=args.host, port=args.port)
     server.set_restart_queue(restart_queue)
     server.start()
-    logger.info("Started file writer server.")
+    logger.info("Started visibility writer server.")
 
     # allow remote debug connections and expose server and args
     manhole.install(oneshot_on='USR1', locals={'server': server, 'args': args})
 
     def graceful_exit(_signo=None, _stack_frame=None):
-        logger.info("Exiting filewriter on SIGTERM")
+        logger.info("Exiting vis_writer on SIGTERM")
         # rely on the interrupt handler around the katcp device server
         # to peform graceful shutdown. this preserves the command
         # line Ctrl-C shutdown.
@@ -397,7 +371,7 @@ if __name__ == '__main__':
                 device.start()
                 logger.info("Started")
     except KeyboardInterrupt:
-        logger.info("Shutting down file_writer server...")
+        logger.info("Shutting down vis_writer server...")
         logger.info("Activity logging stopped")
         server.capture_done()
         server.stop()
