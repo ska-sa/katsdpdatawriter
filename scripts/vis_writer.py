@@ -159,7 +159,7 @@ class VisibilityWriterServer(DeviceServer):
         for dataset, arr in heap.iteritems():
             arr = arr[np.newaxis]
             chunks = list(chunk_info[dataset]['chunks'])
-            start_channels = np.r_[0, np.cumsum(chunks[1])]
+            start_channels = np.r_[0, np.cumsum(chunks[1])].tolist()
             n_chans_per_substream = arr.shape[1]
             start_chunk = start_channels.index(channel0)
             end_chunk = start_channels.index(channel0 + n_chans_per_substream)
@@ -184,8 +184,8 @@ class VisibilityWriterServer(DeviceServer):
         slices = (slice(0, n_dumps),)
         self._obj_store.put(array_name, slices, timestamps)
         capture_block_id = self._obj_store.split(obj_stream_name)[-2]
-        capture_name = self._telstate_l0.SEPARATOR.join(capture_block_id,
-                                                        self._stream_name)
+        capture_name = self._telstate_l0.SEPARATOR.join((capture_block_id,
+                                                         self._stream_name))
         telstate_capture = self._telstate_l0.view(capture_name)
         dask_info = {'dtype': np.dtype(np.float), 'shape': (n_dumps,),
                      'chunks': ((n_dumps,),)}
@@ -340,7 +340,7 @@ class VisibilityWriterServer(DeviceServer):
 
         self._stopping.clear()
         obj_stream_name = self._obj_store.join(
-            self.obj_base_name, capture_block_id, self._stream_name)
+            self._obj_base_name, capture_block_id, self._stream_name)
         chunk_info = self._heap_metadata(n_chans, n_chans_per_substream, n_bls)
         self._capture_thread = threading.Thread(
             target=self._do_capture, name='capture',
@@ -377,9 +377,9 @@ class VisibilityWriterServer(DeviceServer):
         self._logger.info("Joined capture thread")
         self._status_sensor.set_value("finalising")
         self._start_timestamp = None
-        self._logger.info("Finalised file")
+        self._logger.info("Finalised capture")
         self._status_sensor.set_value("idle")
-        return ("ok",)
+        return ("ok", "Capture done")
 
 
 if __name__ == '__main__':
