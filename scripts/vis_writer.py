@@ -396,32 +396,29 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    parser.add_argument('--l0-spead', default=':7200',
+    parser.add_argument('--l0-spead', default=':7200', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7200),
-                        help='source port/multicast groups for spectral L0 input. [default=%(default)s]',
-                        metavar='ENDPOINTS')
-    parser.add_argument('--l0-interface',
-                        help='interface to subscribe to for L0 data. [default=auto]',
-                        metavar='INTERFACE')
-    parser.add_argument('--l0-name', default='sdp_l0',
-                        help='telstate prefix for L0 metadata. [default=%(default)s]',
-                        metavar='NAME')
-    parser.add_argument('--ceph-conf', type=str, default="/etc/ceph/ceph.conf",
-                        metavar='CEPHCONF',
-                        help='Ceph configuration file used for cluster connect')
-    parser.add_argument('--ceph-pool', default='data_vis', type=str,
-                        help='Name of Ceph pool. [default=%(default)s]',
-                        metavar='POOL')
-    parser.add_argument('--ceph-keyring', type=str,
-                        help='Ceph keyring filename.')
-    parser.add_argument('--obj-base-name', type=str, metavar='BASENAME',
-                        help='Base name for objects in store')
-    parser.add_argument('--obj-size', type=float, default=2.0,
-                        help='Target object size in MB')
-    parser.add_argument('-p', '--port', type=int, default=2046,
-                        metavar='N', help='KATCP host port. [default=%(default)s]')
-    parser.add_argument('-a', '--host', type=str, default="",
-                        metavar='HOST', help='KATCP host address. [default=all hosts]')
+                        help='Source port/multicast groups for L0 SPEAD stream. '
+                             '[default=%(default)s]')
+    parser.add_argument('--l0-interface', metavar='INTERFACE',
+                        help='Network interface to subscribe to for L0 stream. '
+                             '[default=auto]')
+    parser.add_argument('--l0-name', default='sdp_l0', metavar='NAME',
+                        help='Name of L0 stream from ingest [default=%(default)s]')
+    parser.add_argument('--ceph-conf', default="/etc/ceph/ceph.conf", metavar='CONF',
+                        help='Ceph configuration file [default=%(default)s]')
+    parser.add_argument('--ceph-pool', default='data_vis', metavar='POOL',
+                        help='Name of Ceph pool [default=%(default)s]')
+    parser.add_argument('--ceph-keyring',
+                        help='Ceph keyring filename (optional)')
+    parser.add_argument('--obj-base-name', default='MKAT', metavar='NAME',
+                        help='Base name for objects in store [default=%(default)s]')
+    parser.add_argument('--obj-size', type=float, default=2.0, metavar='MB',
+                        help='Target object size in MB [default=%(default)s]')
+    parser.add_argument('-p', '--port', type=int, default=2046, metavar='N',
+                        help='KATCP host port [default=%(default)s]')
+    parser.add_argument('-a', '--host', default="", metavar='HOST',
+                        help='KATCP host address [default=all hosts]')
     parser.set_defaults(telstate='localhost')
     args = parser.parse_args()
 
