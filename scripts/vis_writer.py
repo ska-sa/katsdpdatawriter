@@ -178,6 +178,8 @@ class VisibilityWriterServer(DeviceServer):
             dask_graph.update(dsk)
             output_keys.extend(dsk.keys())
         schedule(dask_graph, output_keys)
+        self._logger.info('Wrote %s dump %d, channels starting at %d',
+                          obj_stream_name, dump_index, channel0)
 
     def _write_final(self, obj_stream_name, chunk_info, timestamps):
         """Write final bits after capture is done (timestamps + chunk info)."""
@@ -264,7 +266,12 @@ class VisibilityWriterServer(DeviceServer):
                     weights_channel = ig['weights_channel'].value
                     channel0 = ig['frequency'].value
                     timestamp = ig['timestamp'].value
-                    dump_index = ig['dump_index'].value
+                    try:
+                        dump_index = ig['dump_index'].value
+                    except KeyError:
+                        # Attempt to synthesise dump index from timestamp
+                        t0 = timestamps[0] if timestamps else timestamp
+                        dump_index = int(round((timestamp - t0) / self._int_time))
                     if not timestamps or timestamp >= timestamps[-1]:
                         if not timestamps or timestamp != timestamps[-1]:
                             # Fill in all missing timestamps since last dump too
@@ -285,7 +292,7 @@ class VisibilityWriterServer(DeviceServer):
                             'Received timestamp from the past, discarding (%s < %s)',
                             timestamp, timestamps[-1])
         except Exception as err:
-            self._logger.error(err)
+            self._logger.exception(err)
             end_status = "error"
         finally:
             self._status_sensor.set_value(end_status)
