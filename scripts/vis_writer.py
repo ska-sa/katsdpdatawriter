@@ -96,6 +96,8 @@ class VisibilityWriterServer(DeviceServer):
         #: Signalled when about to stop the thread. Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
         self._start_timestamp = None
+        self._int_time = None
+        self._sync_time = None
         self._rx = None
 
     def setup_sensors(self):
@@ -148,14 +150,14 @@ class VisibilityWriterServer(DeviceServer):
         return chunk_info
 
     def _write_heap(self, obj_stream_name, chunk_info, vis_data, flags,
-                    weights, weights_channel, time_idx, channel0):
+                    weights, weights_channel, dump_index, channel0):
         """"Write a single heap to the object store."""
         dask_graph = {}
         output_keys = []
         schedule = dask.threaded.get
         heap = {'correlator_data': vis_data, 'flags': flags,
                 'weights': weights, 'weights_channel': weights_channel}
-        tfb0 = (time_idx, channel0, 0)
+        tfb0 = (dump_index, channel0, 0)
         for dataset, arr in heap.iteritems():
             arr = arr[np.newaxis]
             chunks = list(chunk_info[dataset]['chunks'])
@@ -262,15 +264,17 @@ class VisibilityWriterServer(DeviceServer):
                     weights_channel = ig['weights_channel'].value
                     channel0 = ig['frequency'].value
                     timestamp = ig['timestamp'].value
+                    dump_index = ig['dump_index'].value
                     if not timestamps or timestamp >= timestamps[-1]:
                         if not timestamps or timestamp != timestamps[-1]:
-                            timestamps.append(timestamp)
-                            n_dumps += 1
+                            # Fill in all missing timestamps since last dump too
+                            for n in reversed(range(dump_index + 1 - n_dumps)):
+                                timestamps.append(timestamp - n * self._int_time)
+                            n_dumps = dump_index + 1
                             self._input_dumps_sensor.set_value(n_dumps)
-                        time_idx = len(timestamps) - 1
                         self._write_heap(obj_stream_name, chunk_info, vis_data,
                                          flags, weights, weights_channel,
-                                         time_idx, channel0)
+                                         dump_index, channel0)
                         n_heaps += 1
                         n_bytes += vis_data.nbytes + flags.nbytes
                         n_bytes += weights.nbytes + weights_channel.nbytes
@@ -292,9 +296,9 @@ class VisibilityWriterServer(DeviceServer):
             if not timestamps:
                 self._logger.warning("Capture block contains no data and hence no timestamps")
             else:
-                timestamps = np.array(timestamps) + self._telstate_l0['sync_time']
+                timestamps = np.array(timestamps) + self._sync_time
                 self._write_final(obj_stream_name, chunk_info, timestamps)
-                self._logger.info('Set %d timestamps', len(timestamps))
+                self._logger.info('Wrote %d timestamps', len(timestamps))
 
     @request(Str(optional=True))
     @return_reply(Str())
@@ -314,6 +318,9 @@ class VisibilityWriterServer(DeviceServer):
             n_chans = self._telstate_l0['n_chans']
             n_chans_per_substream = self._telstate_l0['n_chans_per_substream']
             n_bls = self._telstate_l0['n_bls']
+            # These are needed for timestamps - crash early if not available
+            self._int_time = self._telstate_l0['int_time']
+            self._sync_time = self._telstate_l0['sync_time']
         except KeyError as error:
             self._logger.error('Missing telescope state key: %s', error)
             return ("fail", "Missing telescope state key: {}".format(error))
