@@ -3,7 +3,7 @@
 """Capture L0 visibilities from a SPEAD stream and write to Ceph object store.
 
 This process lives across multiple observations and hence multiple data sets.
-It writes weights and flags as well.
+It writes weights, flags and timestamps as well.
 
 The status sensor has the following states:
 
@@ -16,17 +16,19 @@ Objects are stored in chunks split over time and frequency but not baseline.
 The chunking is chosen to produce objects with sizes on the order of 2 MB.
 Objects have the following naming scheme:
 
-<obj_base_name>/<capture_block>/<stream>/<dataset_name>/<index1>_<index2>_<...>
+  <obj_base_name>/<capture_block>/<stream>/<dataset>/<idx1>[_<idx2>[_<idx3>]]
 
-  - dataset_name: 'correlator_data' / 'weights' / 'flags' / etc.
-  - indexN: chunk start index along N'th dimension
+  - <obj_base_name>: top-level name (telescope? project? defaults to 'MKAT')
+  - <capture_block>: globally unique ID passed to capture_init (observation?)
+  - <stream>: name of specific data product (associated with L0 SPEAD stream)
+  - <dataset>: 'correlator_data' / 'weights' / 'flags' / etc.
+  - <idxN>: chunk start index along N'th dimension
 
-The following useful object parameters are stored in telstate, prefixed by
-'<capture_block>.<stream>.':
+The following useful object parameters are stored in telstate:
 
-  - ceph_pool: the name of the CEPH pool used
-  - ceph_conf: copy of ceph.conf used to connect to target CEPH cluster
-  - <dataset_name>: dict containing chunk info (dtype, shape and chunks)
+  - <stream>_ceph_conf: copy of ceph.conf used to connect to target Ceph cluster
+  - <stream>_ceph_pool: the name of the Ceph pool used
+  - <capture_block>_<stream>_<dataset>: chunk info dict (dtype, shape, chunks)
 """
 
 from __future__ import print_function, division
@@ -73,6 +75,7 @@ def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
 
 
 def dsk_from_chunks(chunks, out_name):
+    """"Turn chunk spec into slices spec and keys suitable for dask Arrays."""
     keys = list(product([out_name], *[range(len(bds)) for bds in chunks]))
     slices = da.core.slices_from_chunks(chunks)
     return zip(keys, slices)
@@ -91,7 +94,7 @@ class VisibilityWriterServer(DeviceServer):
         self._obj_store = obj_store
         self._obj_base_name = obj_base_name
         self._obj_size = obj_size
-        self._telstate_l0 = telstate.view(l0_name)
+        self._telstate_l0 = telstate
         self._capture_thread = None
         #: Signalled when about to stop the thread. Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
@@ -429,14 +432,19 @@ if __name__ == '__main__':
     parser.set_defaults(telstate='localhost')
     args = parser.parse_args()
 
+    # Connect to object store and save config in telstate
     obj_store = RadosChunkStore.from_config(args.ceph_conf, args.ceph_pool,
                                             args.ceph_keyring)
+    telstate_l0 = args.telstate.view(args.l0_name)
+    with open(args.ceph_conf, 'r') as ceph_conf:
+        telstate_l0.add('ceph_conf', ceph_conf.readlines(), immutable=True)
+    telstate_l0.add('ceph_pool', args.ceph_pool, immutable=True)
 
     restart_queue = Queue.Queue()
     server = VisibilityWriterServer(logger, args.l0_spead,
                                     args.l0_interface, args.l0_name,
                                     obj_store, args.obj_base_name,
-                                    args.obj_size, args.telstate,
+                                    args.obj_size, telstate_l0,
                                     host=args.host, port=args.port)
     server.set_restart_queue(restart_queue)
     server.start()
