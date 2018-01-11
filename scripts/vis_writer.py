@@ -58,7 +58,7 @@ import dask.array as da
 def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
     """Generate dask chunk specification from ndarray parameters."""
     dataset_size = np.prod(shape) * np.dtype(dtype).itemsize
-    num_chunks = np.ceil(dataset_size / float(target_obj_size))
+    num_chunks = np.ceil(dataset_size / target_obj_size)
     chunks = [(s,) for s in shape]
     for dim in dims_to_split:
         if dim >= len(shape):
@@ -67,16 +67,16 @@ def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
             chunk_sizes = (1,) * shape[dim]
         else:
             items = np.arange(shape[dim])
-            chunk_indices = np.array_split(items, num_chunks)
+            chunk_indices = np.array_split(items, np.ceil(num_chunks))
             chunk_sizes = tuple([len(chunk) for chunk in chunk_indices])
         chunks[dim] = chunk_sizes
-        num_chunks = np.ceil(num_chunks / len(chunk_sizes))
+        num_chunks /= len(chunk_sizes)
     return tuple(chunks)
 
 
 def dsk_from_chunks(chunks, out_name):
     """"Turn chunk spec into slices spec and keys suitable for dask Arrays."""
-    keys = list(product([out_name], *[range(len(bds)) for bds in chunks]))
+    keys = product([out_name], *[range(len(bds)) for bds in chunks])
     slices = da.core.slices_from_chunks(chunks)
     return zip(keys, slices)
 
@@ -85,8 +85,8 @@ class VisibilityWriterServer(DeviceServer):
     VERSION_INFO = ("sdp-vis-writer", 0, 1)
     BUILD_INFO = ("sdp-vis-writer", 0, 1, "rc1")
 
-    def __init__(self, logger, l0_endpoints, l0_interface, l0_name,
-                 obj_store, obj_base_name, obj_size, telstate, *args, **kwargs):
+    def __init__(self, logger, l0_endpoints, l0_interface, l0_name, obj_store,
+                 obj_base_name, obj_size, telstate_l0, *args, **kwargs):
         super(VisibilityWriterServer, self).__init__(*args, logger=logger, **kwargs)
         self._endpoints = l0_endpoints
         self._interface_address = katsdpservices.get_interface_address(l0_interface)
@@ -94,7 +94,7 @@ class VisibilityWriterServer(DeviceServer):
         self._obj_store = obj_store
         self._obj_base_name = obj_base_name
         self._obj_size = obj_size
-        self._telstate_l0 = telstate
+        self._telstate_l0 = telstate_l0
         self._capture_thread = None
         #: Signalled when about to stop the thread. Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
@@ -130,7 +130,6 @@ class VisibilityWriterServer(DeviceServer):
 
     def _heap_metadata(self, n_chans, n_chans_per_substream, n_bls):
         """Generate chunk metadata for all datasets in heap."""
-        target_obj_size = self._obj_size * 2 ** 20
         chunk_info = {}
         dtypes = {'correlator_data': np.complex64, 'flags': np.uint8,
                   'weights': np.uint8, 'weights_channel': np.float32}
@@ -140,7 +139,7 @@ class VisibilityWriterServer(DeviceServer):
             shape = [1, n_chans_per_substream, n_bls]
             if dataset == 'weights_channel':
                 shape = shape[:-1]
-            chunks = list(generate_chunks(shape, dtype, target_obj_size))
+            chunks = list(generate_chunks(shape, dtype, self._obj_size))
             shape[1] = n_chans
             chunks[1] = n_substreams * chunks[1]
             chunk_info[dataset] = {'dtype': dtype, 'shape': tuple(shape),
@@ -156,12 +155,12 @@ class VisibilityWriterServer(DeviceServer):
                     weights, weights_channel, dump_index, channel0):
         """"Write a single heap to the object store."""
         dask_graph = {}
-        output_keys = []
         schedule = dask.threaded.get
         heap = {'correlator_data': vis_data, 'flags': flags,
                 'weights': weights, 'weights_channel': weights_channel}
         tfb0 = (dump_index, channel0, 0)
         for dataset, arr in heap.iteritems():
+            # Insert time axis (will be singleton dim as heap is part of 1 dump)
             arr = arr[np.newaxis]
             chunks = list(chunk_info[dataset]['chunks'])
             start_channels = np.r_[0, np.cumsum(chunks[1])].tolist()
@@ -170,17 +169,18 @@ class VisibilityWriterServer(DeviceServer):
             end_chunk = start_channels.index(channel0 + n_chans_per_substream)
             chunks[1] = chunks[1][start_chunk:end_chunk]
             heap_offset = tfb0[:-1] if dataset == 'weights_channel' else tfb0
-            offset_slice = lambda s: tuple(slice(s.start + i, s.stop + i)
-                                           for (s, i) in zip(s, heap_offset))
-            shape_slice = lambda slices: tuple(s.stop - s.start for s in slices)
+
+            def offset_slices(s):
+                """"Adjust slices to start at the heap offset."""
+                return tuple(slice(s.start + i, s.stop + i)
+                             for (s, i) in zip(s, heap_offset))
+
             array_name = self._obj_store.join(obj_stream_name, dataset)
             dsk = {k + heap_offset:
-                   (self._obj_store.put, array_name, offset_slice(s),
-                    arr[s].reshape(shape_slice(s)))
+                   (self._obj_store.put, array_name, offset_slices(s), arr[s])
                    for k, s in dsk_from_chunks(chunks, dataset)}
             dask_graph.update(dsk)
-            output_keys.extend(dsk.keys())
-        schedule(dask_graph, output_keys)
+        schedule(dask_graph, dask_graph.keys())
         self._logger.info('Wrote %s dump %d, channels starting at %d',
                           obj_stream_name, dump_index, channel0)
 
@@ -275,25 +275,25 @@ class VisibilityWriterServer(DeviceServer):
                         # Attempt to synthesise dump index from timestamp
                         t0 = timestamps[0] if timestamps else timestamp
                         dump_index = int(round((timestamp - t0) / self._int_time))
-                    if not timestamps or timestamp >= timestamps[-1]:
-                        if not timestamps or timestamp != timestamps[-1]:
-                            # Fill in all missing timestamps since last dump too
-                            for n in reversed(range(dump_index + 1 - n_dumps)):
-                                timestamps.append(timestamp - n * self._int_time)
-                            n_dumps = dump_index + 1
-                            self._input_dumps_sensor.set_value(n_dumps)
-                        self._write_heap(obj_stream_name, chunk_info, vis_data,
-                                         flags, weights, weights_channel,
-                                         dump_index, channel0)
-                        n_heaps += 1
-                        n_bytes += vis_data.nbytes + flags.nbytes
-                        n_bytes += weights.nbytes + weights_channel.nbytes
-                        self._input_heaps_sensor.set_value(n_heaps)
-                        self._input_bytes_sensor.set_value(n_bytes)
-                    else:
-                        self._logger.warning(
-                            'Received timestamp from the past, discarding (%s < %s)',
-                            timestamp, timestamps[-1])
+                        if dump_index < 0:
+                            self._logger.warning(
+                                'Inferred negative dump index, discarding heap '
+                                '(time %s before start time %s)', timestamp, t0)
+                            continue
+                    if not timestamps or timestamp != timestamps[-1]:
+                        # Fill in all missing timestamps since last dump too
+                        for n in reversed(range(dump_index + 1 - n_dumps)):
+                            timestamps.append(timestamp - n * self._int_time)
+                        n_dumps = dump_index + 1
+                        self._input_dumps_sensor.set_value(n_dumps)
+                    self._write_heap(obj_stream_name, chunk_info, vis_data,
+                                     flags, weights, weights_channel,
+                                     dump_index, channel0)
+                    n_heaps += 1
+                    n_bytes += vis_data.nbytes + flags.nbytes
+                    n_bytes += weights.nbytes + weights_channel.nbytes
+                    self._input_heaps_sensor.set_value(n_heaps)
+                    self._input_bytes_sensor.set_value(n_bytes)
         except Exception as err:
             self._logger.exception(err)
             end_status = "error"
@@ -423,7 +423,7 @@ if __name__ == '__main__':
                         help='Ceph keyring filename (optional)')
     parser.add_argument('--obj-base-name', default='MKAT', metavar='NAME',
                         help='Base name for objects in store [default=%(default)s]')
-    parser.add_argument('--obj-size', type=float, default=2.0, metavar='MB',
+    parser.add_argument('--obj-size-mb', type=float, default=2.0, metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('-p', '--port', type=int, default=2046, metavar='N',
                         help='KATCP host port [default=%(default)s]')
@@ -437,14 +437,14 @@ if __name__ == '__main__':
                                             args.ceph_keyring)
     telstate_l0 = args.telstate.view(args.l0_name)
     with open(args.ceph_conf, 'r') as ceph_conf:
-        telstate_l0.add('ceph_conf', ceph_conf.readlines(), immutable=True)
+        telstate_l0.add('ceph_conf', ceph_conf.read(), immutable=True)
     telstate_l0.add('ceph_pool', args.ceph_pool, immutable=True)
 
     restart_queue = Queue.Queue()
     server = VisibilityWriterServer(logger, args.l0_spead,
                                     args.l0_interface, args.l0_name,
                                     obj_store, args.obj_base_name,
-                                    args.obj_size, telstate_l0,
+                                    args.obj_size_mb * 1e6, telstate_l0,
                                     host=args.host, port=args.port)
     server.set_restart_queue(restart_queue)
     server.start()
@@ -459,9 +459,6 @@ if __name__ == '__main__':
         # to peform graceful shutdown. this preserves the command
         # line Ctrl-C shutdown.
         os.kill(os.getpid(), signal.SIGINT)
-
-    # mostly needed for Docker use since this process runs as PID 1
-    # and does not get passed sigterm unless it has a custom listener
     signal.signal(signal.SIGTERM, graceful_exit)
 
     try:
