@@ -278,9 +278,9 @@ class VisibilityWriterServer(DeviceServer):
                         if dump_index < 0:
                             self._logger.warning(
                                 'Inferred negative dump index, discarding heap '
-                                '(time %s before start time %s)', timestamp, t0)
+                                '(time %f before start time %f)', timestamp, t0)
                             continue
-                    if not timestamps or timestamp != timestamps[-1]:
+                    if dump_index >= n_dumps:
                         # Fill in all missing timestamps since last dump too
                         for n in reversed(range(dump_index + 1 - n_dumps)):
                             timestamps.append(timestamp - n * self._int_time)
