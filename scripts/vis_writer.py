@@ -5,12 +5,21 @@
 This process lives across multiple observations and hence multiple data sets.
 It writes weights, flags and timestamps as well.
 
-The status sensor has the following states:
+The status sensor has the following states (with typical transition events):
 
-  - `idle`: data is not being captured
-  - `capturing`: data is being captured
-  - `ready`: CBF data stream has finished, waiting for capture_done request
-  - `finalising`: metadata is being written to file
+  - `idle`: ready to start capture
+     -> ?capture-init ->
+  - `wait-metadata`: waiting for telstate attributes describing L0 stream
+    -> start capture thread ->
+  - `wait-data`: waiting for first heap of L0 visibilities from SPEAD stream
+    -> first SPEAD heap arrives ->
+  - `capturing`: SPEAD data is being captured
+    -> capture stops ->
+  - `finalising`: metadata is being written to telstate, and timestamps to Ceph
+  - `complete`: both data and metadata capture completed
+  - `error`: capture failed
+    -> ?capture-done ->
+  - `idle`: ready to start capture again
 
 Objects are stored in chunks split over time and frequency but not baseline.
 The chunking is chosen to produce objects with sizes on the order of 2 MB.
@@ -19,7 +28,7 @@ Objects have the following naming scheme:
   <obj_base_name>/<capture_block>/<stream>/<dataset>/<idx1>[_<idx2>[_<idx3>]]
 
   - <obj_base_name>: top-level name (telescope? project? defaults to 'MKAT')
-  - <capture_block>: globally unique ID passed to capture_init (observation?)
+  - <capture_block>: unique ID from capture_init (program block ID + timestamp)
   - <stream>: name of specific data product (associated with L0 SPEAD stream)
   - <dataset>: 'correlator_data' / 'weights' / 'flags' / etc.
   - <idxN>: chunk start index along N'th dimension
@@ -44,6 +53,8 @@ from itertools import product
 
 import numpy as np
 import manhole
+import dask
+import dask.array as da
 import spead2
 import spead2.recv
 import katsdptelstate
@@ -51,8 +62,7 @@ import katsdpservices
 from katcp import DeviceServer, Sensor
 from katcp.kattypes import request, return_reply, Str
 from katdal.chunkstore_rados import RadosChunkStore
-import dask
-import dask.array as da
+import katsdpfilewriter
 
 
 def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
@@ -83,7 +93,8 @@ def dsk_from_chunks(chunks, out_name):
 
 class VisibilityWriterServer(DeviceServer):
     VERSION_INFO = ("sdp-vis-writer", 0, 1)
-    BUILD_INFO = ("sdp-vis-writer", 0, 1, "rc1")
+    BUILD_INFO = ('katsdpfilewriter',) + \
+        tuple(katsdpfilewriter.__version__.split('.', 1)) + ('',)
 
     def __init__(self, logger, l0_endpoints, l0_interface, l0_name, obj_store,
                  obj_base_name, obj_size, telstate_l0, *args, **kwargs):
@@ -298,17 +309,19 @@ class VisibilityWriterServer(DeviceServer):
             self._logger.exception(err)
             end_status = "error"
         finally:
-            self._status_sensor.set_value(end_status)
             self._input_bytes_sensor.set_value(0)
             self._input_heaps_sensor.set_value(0)
             self._input_dumps_sensor.set_value(0)
-            # Timestamps in the SPEAD stream are relative to sync_time
             if not timestamps:
-                self._logger.warning("Capture block contains no data and hence no timestamps")
+                self._logger.error("Capture block contains no data and hence no timestamps")
+                end_status = "error"
             else:
+                self._status_sensor.set_value("finalising")
+                # Timestamps in the SPEAD stream are relative to sync_time
                 timestamps = np.array(timestamps) + self._sync_time
                 self._write_final(obj_stream_name, chunk_info, timestamps)
                 self._logger.info('Wrote %d timestamps', len(timestamps))
+            self._status_sensor.set_value(end_status)
 
     @request(Str(optional=True))
     @return_reply(Str())
@@ -391,10 +404,8 @@ class VisibilityWriterServer(DeviceServer):
             self._capture_thread.join()
         self._capture_thread = None
         self._rx = None
-        self._logger.info("Joined capture thread")
-        self._status_sensor.set_value("finalising")
         self._start_timestamp = None
-        self._logger.info("Finalised capture")
+        self._logger.info("Joined capture thread")
         self._status_sensor.set_value("idle")
         return ("ok", "Capture done")
 
