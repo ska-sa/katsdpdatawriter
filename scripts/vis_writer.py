@@ -188,7 +188,7 @@ class VisibilityWriterServer(DeviceServer):
 
             array_name = self._obj_store.join(obj_stream_name, dataset)
             dsk = {k + heap_offset:
-                   (self._obj_store.put, array_name, offset_slices(s), arr[s])
+                   (self._obj_store.put_chunk, array_name, offset_slices(s), arr[s])
                    for k, s in dsk_from_chunks(chunks, dataset)}
             dask_graph.update(dsk)
         schedule(dask_graph, dask_graph.keys())
@@ -200,7 +200,7 @@ class VisibilityWriterServer(DeviceServer):
         array_name = self._obj_store.join(obj_stream_name, 'timestamps')
         n_dumps = len(timestamps)
         slices = (slice(0, n_dumps),)
-        self._obj_store.put(array_name, slices, timestamps)
+        self._obj_store.put_chunk(array_name, slices, timestamps)
         capture_block_id = self._obj_store.split(obj_stream_name)[-2]
         capture_name = self._telstate_l0.SEPARATOR.join((capture_block_id,
                                                          self._stream_name))
@@ -281,7 +281,7 @@ class VisibilityWriterServer(DeviceServer):
                     channel0 = ig['frequency'].value
                     timestamp = ig['timestamp'].value
                     try:
-                        dump_index = ig['dump_index'].value
+                        dump_index = int(ig['dump_index'].value)
                     except KeyError:
                         # Attempt to synthesise dump index from timestamp
                         t0 = timestamps[0] if timestamps else timestamp
