@@ -206,7 +206,7 @@ class VisibilityWriterServer(DeviceServer):
         schedule = dask.threaded.get
         with Profiler() as prof:
             schedule(self._dask_graph, self._dask_graph.keys(),
-		     num_workers=NUM_WORKERS)
+                     num_workers=NUM_WORKERS)
         start = min(res.start_time for res in prof.results)
         end = max(res.end_time for res in prof.results)
         total = sum(res.end_time - res.start_time for res in prof.results)
@@ -336,6 +336,9 @@ class VisibilityWriterServer(DeviceServer):
                     self._graph_nbytes += heap_nbytes
                     if len(self._dask_graph) >= GRAPH_SIZE_TO_WRITE:
                         self._flush_graph()
+            # Flush any leftover chunks once the stream has stopped
+            if self._dask_graph:
+                self._flush_graph()
         except Exception as err:
             self._logger.exception(err)
             end_status = "error"
@@ -348,8 +351,6 @@ class VisibilityWriterServer(DeviceServer):
                 end_status = "error"
             else:
                 self._status_sensor.set_value("finalising")
-                if self._dask_graph:
-                    self._flush_graph()
                 # Timestamps in the SPEAD stream are relative to sync_time
                 timestamps = np.array(timestamps) + self._sync_time
                 self._write_final(obj_stream_name, chunk_info, timestamps)
@@ -381,18 +382,24 @@ class VisibilityWriterServer(DeviceServer):
             self._logger.error('Missing telescope state key: %s', error)
             return ("fail", "Missing telescope state key: {}".format(error))
 
-        # 10 bytes per visibility: 8 for visibility, 1 for flags, 1 for weights; plus weights_channel
-        l0_heap_size = n_bls * n_chans_per_substream * 10 + n_chans_per_substream * 4
+        # 10 bytes per visibility:
+        # 8 for visibility, 1 for flags, 1 for weights; plus weights_channel
+        l0_heap_size = n_bls * n_chans_per_substream * 10
+        l0_heap_size += n_chans_per_substream * 4
         n_substreams = n_chans // n_chans_per_substream
-        chunk_info, n_chunks = self._dump_metadata(n_chans, n_chans_per_substream, n_bls)
+        chunk_info, n_chunks = self._dump_metadata(n_chans,
+                                                   n_chans_per_substream, n_bls)
         n_dumps_per_write = int(np.ceil(GRAPH_SIZE_TO_WRITE / n_chunks))
-        n_heaps_to_buffer = 2 * n_dumps_per_write * n_substreams
+        # Buffer no more than ~n_dumps_per_write dumps to keep up with real time
+        n_heaps_to_buffer = (n_dumps_per_write + 1) * n_substreams
         self._rx = spead2.recv.Stream(spead2.ThreadPool(),
                                       max_heaps=2 * n_substreams,
                                       ring_heaps=n_heaps_to_buffer,
                                       contiguous_only=False)
+        # This covers max_heaps, ring_heaps and the arrays sitting in dask_graph
+        n_memory_buffers = 2 * n_heaps_to_buffer + 4 * n_substreams
         memory_pool = spead2.MemoryPool(l0_heap_size, l0_heap_size + 4096,
-                                        4 * n_heaps_to_buffer, 4 * n_heaps_to_buffer)
+                                        n_memory_buffers, n_memory_buffers)
         self._rx.set_memory_pool(memory_pool)
         self._rx.stop_on_stop_item = False
         for endpoint in self._endpoints:
