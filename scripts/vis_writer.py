@@ -22,22 +22,25 @@ The status sensor has the following states (with typical transition events):
   - `idle`: ready to start capture again
 
 Objects are stored in chunks split over time and frequency but not baseline.
-The chunking is chosen to produce objects with sizes on the order of 2 MB.
+The chunking is chosen to produce objects with sizes on the order of 10 MB.
 Objects have the following naming scheme:
 
-  <obj_base_name>/<capture_block>/<stream>/<dataset>/<idx1>[_<idx2>[_<idx3>]]
+  <obj_stream_name>/<array>/<idx1>[_<idx2>[_<idx3>]]
 
+  - <obj_stream_name>: "file name" e.g. <obj_base_bame>/<capture block>/<stream>
   - <obj_base_name>: top-level name (telescope? project? defaults to 'MKAT')
   - <capture_block>: unique ID from capture_init (program block ID + timestamp)
   - <stream>: name of specific data product (associated with L0 SPEAD stream)
-  - <dataset>: 'correlator_data' / 'weights' / 'flags' / etc.
+  - <array>: 'correlator_data' / 'weights' / 'flags' / etc.
   - <idxN>: chunk start index along N'th dimension
 
 The following useful object parameters are stored in telstate:
 
   - <stream>_ceph_conf: copy of ceph.conf used to connect to target Ceph cluster
   - <stream>_ceph_pool: the name of the Ceph pool used
-  - <capture_block>_<stream>_<dataset>: chunk info dict (dtype, shape, chunks)
+  - <stream>_s3_endpoint: endpoint URL of S3 gateway to Ceph
+  - <capture_block>_<stream>_chunk_name: "file name" i.e. <obj_stream_name>
+  - <capture_block>_<stream>_chunk_info: {dtype, shape, chunks} dict per array
 """
 
 from __future__ import print_function, division
@@ -72,8 +75,8 @@ GRAPH_SIZE_TO_WRITE = 4 * NUM_WORKERS
 
 def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
     """Generate dask chunk specification from ndarray parameters."""
-    dataset_size = np.prod(shape) * np.dtype(dtype).itemsize
-    num_chunks = np.ceil(dataset_size / target_obj_size)
+    array_size = np.prod(shape) * np.dtype(dtype).itemsize
+    num_chunks = np.ceil(array_size / target_obj_size)
     chunks = [(s,) for s in shape]
     for dim in dims_to_split:
         if dim >= len(shape):
@@ -147,28 +150,28 @@ class VisibilityWriterServer(DeviceServer):
         self.add_sensor(self._input_bytes_sensor)
 
     def _dump_metadata(self, n_chans, n_chans_per_substream, n_bls):
-        """Generate chunk metadata for all datasets in dump."""
+        """Generate chunk metadata for all arrays in dump."""
         chunk_info = {}
         chunks_per_dump = 0
         dtypes = {'correlator_data': np.complex64, 'flags': np.uint8,
                   'weights': np.uint8, 'weights_channel': np.float32}
         n_substreams = n_chans // n_chans_per_substream
-        for dataset, dtype in dtypes.iteritems():
+        for array, dtype in dtypes.iteritems():
             dtype = np.dtype(dtype)
             shape = [1, n_chans_per_substream, n_bls]
-            if dataset == 'weights_channel':
+            if array == 'weights_channel':
                 shape = shape[:-1]
             chunks = list(generate_chunks(shape, dtype, self._obj_size))
             shape[1] = n_chans
             chunks[1] = n_substreams * chunks[1]
-            chunk_info[dataset] = {'dtype': dtype, 'shape': tuple(shape),
-                                   'chunks': tuple(chunks)}
+            chunk_info[array] = {'dtype': dtype, 'shape': tuple(shape),
+                                 'chunks': tuple(chunks)}
             num_chunks = np.prod([len(c) for c in chunks])
             chunks_per_dump += num_chunks
             chunk_size = np.prod([c[0] for c in chunks]) * dtype.itemsize
-            self._logger.info("Splitting dataset %r with shape %s and "
+            self._logger.info("Splitting array %r with shape %s and "
                               "dtype %s into %d chunk(s) of ~%d bytes each",
-                              dataset, shape, dtype, num_chunks, chunk_size)
+                              array, shape, dtype, num_chunks, chunk_size)
         return chunk_info, chunks_per_dump
 
     def _add_heap(self, obj_stream_name, chunk_info, vis_data, flags,
@@ -177,26 +180,26 @@ class VisibilityWriterServer(DeviceServer):
         heap = {'correlator_data': vis_data, 'flags': flags,
                 'weights': weights, 'weights_channel': weights_channel}
         tfb0 = (dump_index, channel0, 0)
-        for dataset, arr in heap.iteritems():
+        for array, arr in heap.iteritems():
             # Insert time axis (will be singleton dim as heap is part of 1 dump)
             arr = arr[np.newaxis]
-            chunks = list(chunk_info[dataset]['chunks'])
+            chunks = list(chunk_info[array]['chunks'])
             start_channels = np.r_[0, np.cumsum(chunks[1])].tolist()
             n_chans_per_substream = arr.shape[1]
             start_chunk = start_channels.index(channel0)
             end_chunk = start_channels.index(channel0 + n_chans_per_substream)
             chunks[1] = chunks[1][start_chunk:end_chunk]
-            heap_offset = tfb0[:-1] if dataset == 'weights_channel' else tfb0
+            heap_offset = tfb0[:-1] if array == 'weights_channel' else tfb0
 
             def offset_slices(s):
                 """"Adjust slices to start at the heap offset."""
                 return tuple(slice(s.start + i, s.stop + i)
                              for (s, i) in zip(s, heap_offset))
 
-            array_name = self._obj_store.join(obj_stream_name, dataset)
+            array_name = self._obj_store.join(obj_stream_name, array)
             dsk = {k + heap_offset:
                    (self._obj_store.put_chunk, array_name, offset_slices(s), arr[s])
-                   for k, s in dsk_from_chunks(chunks, dataset)}
+                   for k, s in dsk_from_chunks(chunks, array)}
             self._dask_graph.update(dsk)
         self._logger.info('Added %s dump %d, channels starting at %d',
                           obj_stream_name, dump_index, channel0)
@@ -220,7 +223,7 @@ class VisibilityWriterServer(DeviceServer):
         self._dask_graph = {}
         self._graph_nbytes = 0
 
-    def _write_final(self, obj_stream_name, chunk_info, timestamps):
+    def _write_final(self, obj_stream_name, heap_chunk_info, timestamps):
         """Write final bits after capture is done (timestamps + chunk info)."""
         array_name = self._obj_store.join(obj_stream_name, 'timestamps')
         n_dumps = len(timestamps)
@@ -230,18 +233,20 @@ class VisibilityWriterServer(DeviceServer):
         capture_name = self._telstate_l0.SEPARATOR.join((capture_block_id,
                                                          self._stream_name))
         telstate_capture = self._telstate_l0.view(capture_name)
-        dask_info = {'dtype': np.dtype(np.float), 'shape': (n_dumps,),
-                     'chunks': ((n_dumps,),)}
-        telstate_capture.add('timestamps', dask_info, immutable=True)
-        for dataset in chunk_info:
-            dtype = chunk_info[dataset]['dtype']
-            shape = list(chunk_info[dataset]['shape'])
+        telstate_capture.add('chunk_name', obj_stream_name, immutable=True)
+        full_chunk_info = {}
+        full_chunk_info['timestamps'] = {'dtype': np.dtype(np.float),
+                                         'shape': (n_dumps,),
+                                         'chunks': ((n_dumps,),)}
+        for array, info in heap_chunk_info.iteritems():
+            shape = list(info['shape'])
             shape[0] = n_dumps
-            chunks = list(chunk_info[dataset]['chunks'])
+            chunks = list(info['chunks'])
             chunks[0] = n_dumps * (1,)
-            dask_info = {'dtype': dtype, 'shape': tuple(shape),
-                         'chunks': tuple(chunks)}
-            telstate_capture.add(dataset, dask_info, immutable=True)
+            full_chunk_info[array] = {'dtype': info['dtype'],
+                                      'shape': tuple(shape),
+                                      'chunks': tuple(chunks)}
+        telstate_capture.add('chunk_info', full_chunk_info, immutable=True)
 
     def _do_capture(self, obj_stream_name, chunk_info):
         """Capture a stream from SPEAD and write to object store.
@@ -253,7 +258,7 @@ class VisibilityWriterServer(DeviceServer):
         obj_stream_name : string
             Prefix of all object keys associated with captured stream
         chunk_info : dict
-            Dict containing dtype / shape / chunks info per dataset in heap
+            Dict containing dtype / shape / chunks info per array in heap
         """
         timestamps = []
         n_dumps = 0
@@ -476,7 +481,7 @@ if __name__ == '__main__':
                         help='Ceph keyring filename (optional)')
     parser.add_argument('--obj-base-name', default='MKAT', metavar='NAME',
                         help='Base name for objects in store [default=%(default)s]')
-    parser.add_argument('--obj-size-mb', type=float, default=2.0, metavar='MB',
+    parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('-p', '--port', type=int, default=2046, metavar='N',
                         help='KATCP host port [default=%(default)s]')
