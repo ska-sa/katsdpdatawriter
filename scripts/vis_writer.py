@@ -66,6 +66,7 @@ import katsdpservices
 from katcp import DeviceServer, Sensor
 from katcp.kattypes import request, return_reply, Str
 from katdal.chunkstore_rados import RadosChunkStore
+from katdal.chunkstore_npy import NpyFileChunkStore
 import katsdpfilewriter
 
 
@@ -479,6 +480,11 @@ if __name__ == '__main__':
                         help='Name of Ceph pool [default=%(default)s]')
     parser.add_argument('--ceph-keyring',
                         help='Ceph keyring filename (optional)')
+    parser.add_argument('--s3-endpoint',
+                        help='URL of S3 gateway to Ceph cluster')
+    parser.add_argument('--npy-path',
+                        help='Write NPY files to this directory '
+			     'instead of directly to object store')
     parser.add_argument('--obj-base-name', default='MKAT', metavar='NAME',
                         help='Base name for objects in store [default=%(default)s]')
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
@@ -491,8 +497,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Connect to object store and save config in telstate
-    obj_store = RadosChunkStore.from_config(args.ceph_conf, args.ceph_pool,
-                                            args.ceph_keyring)
+    if args.npy_path:
+        obj_store = NpyFileChunkStore(args.npy_path)
+    else:
+        obj_store = RadosChunkStore.from_config(args.ceph_conf, args.ceph_pool,
+                                                args.ceph_keyring)
     telstate_l0 = args.telstate.view(args.l0_name)
     with open(args.ceph_conf, 'r') as ceph_conf:
         telstate_l0.add('ceph_conf', ceph_conf.read(), immutable=True)
