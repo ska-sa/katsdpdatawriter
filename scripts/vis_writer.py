@@ -25,10 +25,9 @@ Objects are stored in chunks split over time and frequency but not baseline.
 The chunking is chosen to produce objects with sizes on the order of 10 MB.
 Objects have the following naming scheme:
 
-  <obj_stream_name>/<array>/<idx1>[_<idx2>[_<idx3>]]
+  <capture_stream>/<array>/<idx1>[_<idx2>[_<idx3>]]
 
-  - <obj_stream_name>: "file name" e.g. <obj_base_bame>/<capture block>/<stream>
-  - <obj_base_name>: top-level name (telescope? project? defaults to 'MKAT')
+  - <capture_stream>: "file name"/bucket in store i.e. <capture block>_<stream>
   - <capture_block>: unique ID from capture_init (program block ID + timestamp)
   - <stream>: name of specific data product (associated with L0 SPEAD stream)
   - <array>: 'correlator_data' / 'weights' / 'flags' / etc.
@@ -38,9 +37,8 @@ The following useful object parameters are stored in telstate:
 
   - <stream>_ceph_conf: copy of ceph.conf used to connect to target Ceph cluster
   - <stream>_ceph_pool: the name of the Ceph pool used
-  - <stream>_s3_endpoint: endpoint URL of S3 gateway to Ceph
-  - <capture_block>_<stream>_chunk_name: "file name" i.e. <obj_stream_name>
-  - <capture_block>_<stream>_chunk_info: {dtype, shape, chunks} dict per array
+  - <stream>_s3_endpoint_url: endpoint URL of S3 gateway to Ceph
+  - <capture_stream>_chunk_info: {dtype, shape, chunks} dict per array
 """
 
 from __future__ import print_function, division
@@ -106,17 +104,17 @@ class VisibilityWriterServer(DeviceServer):
         tuple(katsdpfilewriter.__version__.split('.', 1)) + ('',)
 
     def __init__(self, logger, l0_endpoints, l0_interface, l0_name, obj_store,
-                 obj_base_name, obj_size, telstate_l0, *args, **kwargs):
+                 obj_size, telstate_l0, *args, **kwargs):
         super(VisibilityWriterServer, self).__init__(*args, logger=logger, **kwargs)
         self._endpoints = l0_endpoints
         self._interface_address = katsdpservices.get_interface_address(l0_interface)
         self._stream_name = l0_name
         self._obj_store = obj_store
-        self._obj_base_name = obj_base_name
         self._obj_size = obj_size
         self._telstate_l0 = telstate_l0
         self._capture_thread = None
-        #: Signalled when about to stop the thread. Never waited for, just a thread-safe flag.
+        # Signalled when about to stop the thread.
+        # Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
         self._start_timestamp = None
         self._int_time = None
@@ -175,13 +173,11 @@ class VisibilityWriterServer(DeviceServer):
                               array, shape, dtype, num_chunks, chunk_size)
         return chunk_info, chunks_per_dump
 
-    def _add_heap(self, obj_stream_name, chunk_info, vis_data, flags,
-                  weights, weights_channel, dump_index, channel0):
+    def _add_heap(self, capture_stream_name, chunk_info, heap_arrays,
+                  dump_index, channel0):
         """"Add a single heap to pending dask graph."""
-        heap = {'correlator_data': vis_data, 'flags': flags,
-                'weights': weights, 'weights_channel': weights_channel}
         tfb0 = (dump_index, channel0, 0)
-        for array, arr in heap.iteritems():
+        for array, arr in heap_arrays.iteritems():
             # Insert time axis (will be singleton dim as heap is part of 1 dump)
             arr = arr[np.newaxis]
             chunks = list(chunk_info[array]['chunks'])
@@ -197,13 +193,13 @@ class VisibilityWriterServer(DeviceServer):
                 return tuple(slice(s.start + i, s.stop + i)
                              for (s, i) in zip(s, heap_offset))
 
-            array_name = self._obj_store.join(obj_stream_name, array)
+            array_name = self._obj_store.join(capture_stream_name, array)
             dsk = {k + heap_offset:
                    (self._obj_store.put_chunk, array_name, offset_slices(s), arr[s])
                    for k, s in dsk_from_chunks(chunks, array)}
             self._dask_graph.update(dsk)
         self._logger.info('Added %s dump %d, channels starting at %d',
-                          obj_stream_name, dump_index, channel0)
+                          capture_stream_name, dump_index, channel0)
 
     def _flush_graph(self):
         """Flush entire dask graph to object store."""
@@ -224,17 +220,13 @@ class VisibilityWriterServer(DeviceServer):
         self._dask_graph = {}
         self._graph_nbytes = 0
 
-    def _write_final(self, obj_stream_name, heap_chunk_info, timestamps):
+    def _write_final(self, capture_stream_name, heap_chunk_info, timestamps):
         """Write final bits after capture is done (timestamps + chunk info)."""
-        array_name = self._obj_store.join(obj_stream_name, 'timestamps')
+        array_name = self._obj_store.join(capture_stream_name, 'timestamps')
         n_dumps = len(timestamps)
         slices = (slice(0, n_dumps),)
         self._obj_store.put_chunk(array_name, slices, timestamps)
-        capture_block_id = self._obj_store.split(obj_stream_name)[-2]
-        capture_name = self._telstate_l0.SEPARATOR.join((capture_block_id,
-                                                         self._stream_name))
-        telstate_capture = self._telstate_l0.view(capture_name)
-        telstate_capture.add('chunk_name', obj_stream_name, immutable=True)
+        telstate_capture = self._telstate_l0.view(capture_stream_name)
         full_chunk_info = {}
         full_chunk_info['timestamps'] = {'dtype': np.dtype(np.float),
                                          'shape': (n_dumps,),
@@ -249,15 +241,15 @@ class VisibilityWriterServer(DeviceServer):
                                       'chunks': tuple(chunks)}
         telstate_capture.add('chunk_info', full_chunk_info, immutable=True)
 
-    def _do_capture(self, obj_stream_name, chunk_info):
+    def _do_capture(self, capture_stream_name, chunk_info):
         """Capture a stream from SPEAD and write to object store.
 
         This is run in a separate thread.
 
         Parameters
         ----------
-        obj_stream_name : string
-            Prefix of all object keys associated with captured stream
+        capture_stream_name : string
+            "File name" of captured stream, both in chunk store and telstate
         chunk_info : dict
             Dict containing dtype / shape / chunks info per array in heap
         """
@@ -307,7 +299,7 @@ class VisibilityWriterServer(DeviceServer):
                 else:
                     updated = ig.update(heap)
                 if 'timestamp' in updated:
-                    vis_data = ig['correlator_data'].value
+                    vis = ig['correlator_data'].value
                     flags = ig['flags'].value
                     weights = ig['weights'].value
                     weights_channel = ig['weights_channel'].value
@@ -330,10 +322,12 @@ class VisibilityWriterServer(DeviceServer):
                             timestamps.append(timestamp - n * self._int_time)
                         n_dumps = dump_index + 1
                         self._input_dumps_sensor.set_value(n_dumps)
-                    self._add_heap(obj_stream_name, chunk_info, vis_data,
-                                   flags, weights, weights_channel,
+                    heap_arrays = {'correlator_data': vis, 'flags': flags,
+                                   'weights': weights,
+                                   'weights_channel': weights_channel}
+                    self._add_heap(capture_stream_name, chunk_info, heap_arrays,
                                    dump_index, channel0)
-                    heap_nbytes = vis_data.nbytes + flags.nbytes
+                    heap_nbytes = vis.nbytes + flags.nbytes
                     heap_nbytes += weights.nbytes + weights_channel.nbytes
                     n_heaps += 1
                     n_bytes += heap_nbytes
@@ -359,7 +353,7 @@ class VisibilityWriterServer(DeviceServer):
                 self._status_sensor.set_value("finalising")
                 # Timestamps in the SPEAD stream are relative to sync_time
                 timestamps = np.array(timestamps) + self._sync_time
-                self._write_final(obj_stream_name, chunk_info, timestamps)
+                self._write_final(capture_stream_name, chunk_info, timestamps)
                 self._logger.info('Wrote %d timestamps', len(timestamps))
             self._status_sensor.set_value(end_status)
 
@@ -418,14 +412,14 @@ class VisibilityWriterServer(DeviceServer):
                                         buffer_size=l0_heap_size + 4096)
 
         self._stopping.clear()
-        obj_stream_name = self._obj_store.join(
-            self._obj_base_name, capture_block_id, self._stream_name)
+        sep = self._telstate_l0.SEPARATOR
+        capture_stream_name = sep.join((capture_block_id, self._stream_name))
         self._capture_thread = threading.Thread(
             target=self._do_capture, name='capture',
-            args=(obj_stream_name, chunk_info))
+            args=(capture_stream_name, chunk_info))
         self._capture_thread.start()
-        self._logger.info("Starting capture to %s", obj_stream_name)
-        return ("ok", "Capture initialised to {0}".format(obj_stream_name))
+        self._logger.info("Starting capture to %s", capture_stream_name)
+        return ("ok", "Capture initialised to {0}".format(capture_stream_name))
 
     @request()
     @return_reply(Str())
@@ -480,13 +474,11 @@ if __name__ == '__main__':
                         help='Name of Ceph pool [default=%(default)s]')
     parser.add_argument('--ceph-keyring',
                         help='Ceph keyring filename (optional)')
-    parser.add_argument('--s3-endpoint',
+    parser.add_argument('--s3-endpoint-url', default="http://10.98.56.16:7480",
                         help='URL of S3 gateway to Ceph cluster')
     parser.add_argument('--npy-path',
-                        help='Write NPY files to this directory '
-			     'instead of directly to object store')
-    parser.add_argument('--obj-base-name', default='MKAT', metavar='NAME',
-                        help='Base name for objects in store [default=%(default)s]')
+                        help='Write NPY files to this directory instead of '
+                             'directly to object store')
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('-p', '--port', type=int, default=2046, metavar='N',
@@ -506,10 +498,10 @@ if __name__ == '__main__':
     with open(args.ceph_conf, 'r') as ceph_conf:
         telstate_l0.add('ceph_conf', ceph_conf.read(), immutable=True)
     telstate_l0.add('ceph_pool', args.ceph_pool, immutable=True)
+    telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)
     restart_queue = Queue.Queue()
-    server = VisibilityWriterServer(logger, args.l0_spead,
-                                    args.l0_interface, args.l0_name,
-                                    obj_store, args.obj_base_name,
+    server = VisibilityWriterServer(logger, args.l0_spead, args.l0_interface,
+                                    args.l0_name, obj_store,
                                     args.obj_size_mb * 1e6, telstate_l0,
                                     host=args.host, port=args.port)
     server.set_restart_queue(restart_queue)
