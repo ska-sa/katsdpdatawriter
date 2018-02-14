@@ -227,6 +227,7 @@ class VisibilityWriterServer(DeviceServer):
         slices = (slice(0, n_dumps),)
         self._obj_store.put_chunk(array_name, slices, timestamps)
         telstate_capture = self._telstate_l0.view(capture_stream_name)
+        telstate_capture.add('chunk_name', capture_stream_name, immutable=True)
         full_chunk_info = {}
         full_chunk_info['timestamps'] = {'dtype': np.dtype(np.float),
                                          'shape': (n_dumps,),
