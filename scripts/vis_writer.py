@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Capture L0 visibilities from a SPEAD stream and write to Ceph object store.
+"""Capture L0 visibilities from a SPEAD stream and write to a local chunk store.
 
 This process lives across multiple observations and hence multiple data sets.
 It writes weights, flags and timestamps as well.
@@ -15,7 +15,7 @@ The status sensor has the following states (with typical transition events):
     -> first SPEAD heap arrives ->
   - `capturing`: SPEAD data is being captured
     -> capture stops ->
-  - `finalising`: metadata is being written to telstate, and timestamps to Ceph
+  - `finalising`: metadata is being written to telstate, and timestamps to the store
   - `complete`: both data and metadata capture completed
   - `error`: capture failed
     -> ?capture-done ->
@@ -35,8 +35,6 @@ Objects have the following naming scheme:
 
 The following useful object parameters are stored in telstate:
 
-  - <stream>_ceph_conf: copy of ceph.conf used to connect to target Ceph cluster
-  - <stream>_ceph_pool: the name of the Ceph pool used
   - <stream>_s3_endpoint_url: endpoint URL of S3 gateway to Ceph
   - <capture_stream>_chunk_info: {dtype, shape, chunks} dict per array
 """
@@ -63,7 +61,6 @@ import katsdptelstate
 import katsdpservices
 from katcp import DeviceServer, Sensor
 from katcp.kattypes import request, return_reply, Str
-from katdal.chunkstore_rados import RadosChunkStore
 from katdal.chunkstore_npy import NpyFileChunkStore
 import katsdpfilewriter
 
@@ -198,8 +195,8 @@ class VisibilityWriterServer(DeviceServer):
                    (self._obj_store.put_chunk, array_name, offset_slices(s), arr[s])
                    for k, s in dsk_from_chunks(chunks, array)}
             self._dask_graph.update(dsk)
-        self._logger.info('Added %s dump %d, channels starting at %d',
-                          capture_stream_name, dump_index, channel0)
+        self._logger.debug('Added %s dump %d, channels starting at %d',
+                           capture_stream_name, dump_index, channel0)
 
     def _flush_graph(self):
         """Flush entire dask graph to object store."""
@@ -469,12 +466,6 @@ if __name__ == '__main__':
                              '[default=auto]')
     parser.add_argument('--l0-name', default='sdp_l0', metavar='NAME',
                         help='Name of L0 stream from ingest [default=%(default)s]')
-    parser.add_argument('--ceph-conf', default="/etc/ceph/ceph.conf", metavar='CONF',
-                        help='Ceph configuration file [default=%(default)s]')
-    parser.add_argument('--ceph-pool', default='data_vis', metavar='POOL',
-                        help='Name of Ceph pool [default=%(default)s]')
-    parser.add_argument('--ceph-keyring',
-                        help='Ceph keyring filename (optional)')
     parser.add_argument('--s3-endpoint-url',
                         help='URL of S3 gateway to Ceph cluster')
     parser.add_argument('--npy-path',
@@ -488,17 +479,12 @@ if __name__ == '__main__':
                         help='KATCP host address [default=all hosts]')
     parser.set_defaults(telstate='localhost')
     args = parser.parse_args()
+    if not args.npy_path:
+        parser.error('--npy-path is required')
 
     # Connect to object store and save config in telstate
-    if args.npy_path:
-        obj_store = NpyFileChunkStore(args.npy_path)
-    else:
-        obj_store = RadosChunkStore.from_config(args.ceph_conf, args.ceph_pool,
-                                                args.ceph_keyring)
+    obj_store = NpyFileChunkStore(args.npy_path)
     telstate_l0 = args.telstate.view(args.l0_name)
-    with open(args.ceph_conf, 'r') as ceph_conf:
-        telstate_l0.add('ceph_conf', ceph_conf.read(), immutable=True)
-    telstate_l0.add('ceph_pool', args.ceph_pool, immutable=True)
     if args.s3_endpoint_url:
         telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)
     restart_queue = Queue.Queue()
