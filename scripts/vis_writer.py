@@ -229,7 +229,7 @@ class VisibilityWriterServer(DeviceServer):
         telstate_capture = self._telstate_l0.view(capture_stream_name)
         telstate_capture.add('chunk_name', capture_stream_name, immutable=True)
         full_chunk_info = {}
-        full_chunk_info['timestamps'] = {'dtype': np.dtype(np.float),
+        full_chunk_info['timestamps'] = {'dtype': np.dtype(np.float64),
                                          'shape': (n_dumps,),
                                          'chunks': ((n_dumps,),)}
         for array, info in heap_chunk_info.iteritems():
@@ -475,7 +475,7 @@ if __name__ == '__main__':
                         help='Name of Ceph pool [default=%(default)s]')
     parser.add_argument('--ceph-keyring',
                         help='Ceph keyring filename (optional)')
-    parser.add_argument('--s3-endpoint-url', default="http://10.98.56.16:7480",
+    parser.add_argument('--s3-endpoint-url',
                         help='URL of S3 gateway to Ceph cluster')
     parser.add_argument('--npy-path',
                         help='Write NPY files to this directory instead of '
@@ -499,7 +499,8 @@ if __name__ == '__main__':
     with open(args.ceph_conf, 'r') as ceph_conf:
         telstate_l0.add('ceph_conf', ceph_conf.read(), immutable=True)
     telstate_l0.add('ceph_pool', args.ceph_pool, immutable=True)
-    telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)
+    if args.s3_endpoint_url:
+        telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)
     restart_queue = Queue.Queue()
     server = VisibilityWriterServer(logger, args.l0_spead, args.l0_interface,
                                     args.l0_name, obj_store,
