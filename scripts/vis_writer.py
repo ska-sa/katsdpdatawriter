@@ -36,6 +36,7 @@ Objects have the following naming scheme:
 The following useful object parameters are stored in telstate:
 
   - <stream>_s3_endpoint_url: endpoint URL of S3 gateway to Ceph
+  - <capture_stream>_chunk_name: data set name in store, i.e. <capture_stream>
   - <capture_stream>_chunk_info: {dtype, shape, chunks} dict per array
 """
 
