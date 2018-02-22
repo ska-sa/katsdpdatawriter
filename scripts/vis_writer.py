@@ -47,6 +47,7 @@ import threading
 import logging
 import Queue
 import signal
+import subprocess
 from itertools import product
 
 import numpy as np
@@ -228,6 +229,7 @@ class VisibilityWriterServer(DeviceServer):
                                       'chunks': tuple(chunks)}
         telstate_capture.add('chunk_info', full_chunk_info, immutable=True)
         # Touch a token file to indicate that no more chunk data is coming
+        subprocess.call('sync')
         completion_token = os.path.join(self._obj_store.path,
                                         capture_stream_name, 'complete')
         open(completion_token, 'a').close()
