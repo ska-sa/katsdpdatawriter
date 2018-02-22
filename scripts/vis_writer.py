@@ -227,6 +227,10 @@ class VisibilityWriterServer(DeviceServer):
                                       'shape': tuple(shape),
                                       'chunks': tuple(chunks)}
         telstate_capture.add('chunk_info', full_chunk_info, immutable=True)
+        # Touch a token file to indicate that no more chunk data is coming
+        completion_token = os.path.join(self._obj_store.path,
+                                        capture_stream_name, 'complete')
+        open(completion_token, 'a').close()
 
     def _do_capture(self, capture_stream_name, chunk_info):
         """Capture a stream from SPEAD and write to object store.
