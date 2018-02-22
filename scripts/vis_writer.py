@@ -3,7 +3,7 @@
 """Capture L0 visibilities from a SPEAD stream and write to a local chunk store.
 
 This process lives across multiple observations and hence multiple data sets.
-It writes weights, flags and timestamps as well.
+It writes weights and flags as well.
 
 The status sensor has the following states (with typical transition events):
 
@@ -15,7 +15,7 @@ The status sensor has the following states (with typical transition events):
     -> first SPEAD heap arrives ->
   - `capturing`: SPEAD data is being captured
     -> capture stops ->
-  - `finalising`: metadata is being written to telstate, and timestamps to the store
+  - `finalising`: metadata is being written to telstate
   - `complete`: both data and metadata capture completed
   - `error`: capture failed
     -> ?capture-done ->
@@ -28,7 +28,7 @@ Objects have the following naming scheme:
   <capture_stream>/<array>/<idx1>[_<idx2>[_<idx3>]]
 
   - <capture_stream>: "file name"/bucket in store i.e. <capture block>_<stream>
-  - <capture_block>: unique ID from capture_init (program block ID + timestamp)
+  - <capture_block>: unique ID from capture_init (Unix timestamp at init)
   - <stream>: name of specific data product (associated with L0 SPEAD stream)
   - <array>: 'correlator_data' / 'weights' / 'flags' / etc.
   - <idxN>: chunk start index along N'th dimension
@@ -42,8 +42,6 @@ The following useful object parameters are stored in telstate:
 
 from __future__ import print_function, division
 
-import time
-import os.path
 import os
 import threading
 import logging
@@ -114,9 +112,6 @@ class VisibilityWriterServer(DeviceServer):
         # Signalled when about to stop the thread.
         # Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
-        self._start_timestamp = None
-        self._int_time = None
-        self._sync_time = None
         self._rx = None
         self._dask_graph = {}
         self._graph_nbytes = 0
@@ -218,18 +213,11 @@ class VisibilityWriterServer(DeviceServer):
         self._dask_graph = {}
         self._graph_nbytes = 0
 
-    def _write_final(self, capture_stream_name, heap_chunk_info, timestamps):
-        """Write final bits after capture is done (timestamps + chunk info)."""
-        array_name = self._obj_store.join(capture_stream_name, 'timestamps')
-        n_dumps = len(timestamps)
-        slices = (slice(0, n_dumps),)
-        self._obj_store.put_chunk(array_name, slices, timestamps)
+    def _write_final(self, capture_stream_name, heap_chunk_info, n_dumps):
+        """Write final bits (mostly chunk info) after capture is done."""
         telstate_capture = self._telstate_l0.view(capture_stream_name)
         telstate_capture.add('chunk_name', capture_stream_name, immutable=True)
         full_chunk_info = {}
-        full_chunk_info['timestamps'] = {'dtype': np.dtype(np.float64),
-                                         'shape': (n_dumps,),
-                                         'chunks': ((n_dumps,),)}
         for array, info in heap_chunk_info.iteritems():
             shape = list(info['shape'])
             shape[0] = n_dumps
@@ -252,7 +240,6 @@ class VisibilityWriterServer(DeviceServer):
         chunk_info : dict
             Dict containing dtype / shape / chunks info per array in heap
         """
-        timestamps = []
         n_dumps = 0
         n_heaps = 0
         n_bytes = 0
@@ -290,7 +277,8 @@ class VisibilityWriterServer(DeviceServer):
                     # asked to stop.
                     if not self._stopping.is_set():
                         self._logger.warning(
-                            "dropped incomplete heap %d (%d/%d bytes of payload)",
+                            "dropped incomplete heap %d "
+                            "(received %d/%d bytes of payload)",
                             heap.cnt, heap.received_length, heap.heap_length)
                         n_incomplete_heaps += 1
                         self._input_incomplete_heaps_sensor.set_value(n_incomplete_heaps)
@@ -303,22 +291,8 @@ class VisibilityWriterServer(DeviceServer):
                     weights = ig['weights'].value
                     weights_channel = ig['weights_channel'].value
                     channel0 = ig['frequency'].value
-                    timestamp = ig['timestamp'].value
-                    try:
-                        dump_index = int(ig['dump_index'].value)
-                    except KeyError:
-                        # Attempt to synthesise dump index from timestamp
-                        t0 = timestamps[0] if timestamps else timestamp
-                        dump_index = int(round((timestamp - t0) / self._int_time))
-                        if dump_index < 0:
-                            self._logger.warning(
-                                'Inferred negative dump index, discarding heap '
-                                '(time %f before start time %f)', timestamp, t0)
-                            continue
+                    dump_index = int(ig['dump_index'].value)
                     if dump_index >= n_dumps:
-                        # Fill in all missing timestamps since last dump too
-                        for n in reversed(range(dump_index + 1 - n_dumps)):
-                            timestamps.append(timestamp - n * self._int_time)
                         n_dumps = dump_index + 1
                         self._input_dumps_sensor.set_value(n_dumps)
                     heap_arrays = {'correlator_data': vis, 'flags': flags,
@@ -345,15 +319,13 @@ class VisibilityWriterServer(DeviceServer):
             self._input_bytes_sensor.set_value(0)
             self._input_heaps_sensor.set_value(0)
             self._input_dumps_sensor.set_value(0)
-            if not timestamps:
-                self._logger.error("Capture block contains no data and hence no timestamps")
+            if not n_dumps:
+                self._logger.error("Capture block contains no data")
                 end_status = "error"
             else:
                 self._status_sensor.set_value("finalising")
-                # Timestamps in the SPEAD stream are relative to sync_time
-                timestamps = np.array(timestamps) + self._sync_time
-                self._write_final(capture_stream_name, chunk_info, timestamps)
-                self._logger.info('Wrote %d timestamps', len(timestamps))
+                self._write_final(capture_stream_name, chunk_info, n_dumps)
+                self._logger.info('Wrote %d dumps', n_dumps)
             self._status_sensor.set_value(end_status)
 
     @request(Str(optional=True))
@@ -363,20 +335,15 @@ class VisibilityWriterServer(DeviceServer):
         if self._capture_thread is not None:
             self._logger.info("Ignoring capture_init because already capturing")
             return ("fail", "Already capturing")
-        timestamp = time.time()
         self._device_status_sensor.set_value("ok")
         self._status_sensor.set_value("wait-metadata")
         self._input_dumps_sensor.set_value(0)
         self._input_bytes_sensor.set_value(0)
-        self._start_timestamp = timestamp
         # Set up memory buffers, depending on size of input heaps
         try:
             n_chans = self._telstate_l0['n_chans']
             n_chans_per_substream = self._telstate_l0['n_chans_per_substream']
             n_bls = self._telstate_l0['n_bls']
-            # These are needed for timestamps - crash early if not available
-            self._int_time = self._telstate_l0['int_time']
-            self._sync_time = self._telstate_l0['sync_time']
         except KeyError as error:
             self._logger.error('Missing telescope state key: %s', error)
             return ("fail", "Missing telescope state key: {}".format(error))
@@ -445,7 +412,6 @@ class VisibilityWriterServer(DeviceServer):
             self._capture_thread.join()
         self._capture_thread = None
         self._rx = None
-        self._start_timestamp = None
         self._logger.info("Joined capture thread")
         self._status_sensor.set_value("idle")
         return ("ok", "Capture done")
