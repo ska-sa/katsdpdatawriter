@@ -176,7 +176,6 @@ class FlagWriterServer(DeviceServer):
                     first = False
                 if heap.is_end_of_stream():
                     logger.info("Stop packet received")
-                    
                 if isinstance(heap, spead2.recv.IncompleteHeap):
                     logger.warning("dropped incomplete heap %d "
                             "(received %d/%d bytes of payload)",
@@ -208,9 +207,11 @@ class FlagWriterServer(DeviceServer):
                     n_heaps += 1
                     self._input_heaps_sensor.value = n_heaps
                     self._input_bytes_sensor.value = flags.nbytes
+        except spead2._spead2.Stopped:
+            logger.info("SPEAD receiver stopped.")
+             # Ctrl-C or halt (stop packets ignored)
         except Exception as err:
             logger.exception(err)
-            end_status = "error"
         finally:
             self._input_bytes_sensor.value = 0
             self._input_heaps_sensor.value = 0
