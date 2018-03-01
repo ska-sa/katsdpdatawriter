@@ -10,7 +10,6 @@ picked up by katdal.
 """
 
 import os
-import threading
 import logging
 import signal
 import enum
@@ -27,22 +26,26 @@ import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdpflagwriter
 
+
 class Status(enum.Enum):
     IDLE = 1
     WAIT_DATA = 2
     CAPTURING = 3
     FINISHED = 4
 
+
 class State(enum.Enum):
     """State of a single capture block"""
     CAPTURING = 1         # capture-init has been called, but not capture-done
     COMPLETE = 2          # capture-done has been called
+
 
 class EnumEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, enum.Enum):
             return obj.name
         return json.JSONEncoder.default(self, obj)
+
 
 def _warn_if_positive(value):
     return Sensor.Status.WARN if value > 0 else Sensor.Status.NOMINAL
@@ -143,7 +146,7 @@ class FlagWriterServer(DeviceServer):
         if flag_key not in self._flags:
             self._flags[flag_key] = np.zeros((len(self._endpoints) * flags.shape[0], flags.shape[1]))
 
-        self._flags[flag_key][channel0:channel0+flag.shape[0]] = flags
+        self._flags[flag_key][channel0:channel0 + flags.shape[0]] = flags
         self._flag_fragments[flag_key] += 1
 
         # Received a complete flag dump - writing to disk
@@ -204,9 +207,8 @@ class FlagWriterServer(DeviceServer):
                     stored = self._add_flags(flags, cbid, dump_index, channel0)
                     if stored:
                         self._output_objects_sensor.value += 1
-                    n_heaps += 1
-                    self._input_heaps_sensor.value = n_heaps
-                    self._input_bytes_sensor.value = flags.nbytes
+                    self._input_heaps_sensor.value += 1
+                    self._input_bytes_sensor.value += flags.nbytes
         except spead2._spead2.Stopped:
             logger.info("SPEAD receiver stopped.")
              # Ctrl-C or halt (stop packets ignored)
@@ -236,7 +238,7 @@ class FlagWriterServer(DeviceServer):
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:
         """Notice to mark specified capture_block_id as complete and inform
         downstream services of completion."""
-        if not capture_block_id in self._capture_block_state:
+        if capture_block_id not in self._capture_block_state:
             raise FailReply("Specified capture block ID {} is unkown.".format(capture_block_id))
         if self._capture_block_state[capture_block_id] != State.CAPTURING:
             raise FailReply("Specified capture block ID {} is not in state capturing.".format(capture_block_id))
