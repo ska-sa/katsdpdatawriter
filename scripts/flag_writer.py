@@ -55,7 +55,6 @@ class FlagWriterServer(DeviceServer):
     def __init__(self, host, port, loop, endpoints, flag_interface, npy_path, telstate):
         self._npy_path = npy_path
         self._telstate = telstate
-        self._receive_done = threading.Event()
         self._endpoints = endpoints
         self._interface_address = katsdpservices.get_interface_address(flag_interface)
         self._n_streams = len(endpoints)
@@ -158,7 +157,7 @@ class FlagWriterServer(DeviceServer):
         return False
 
     def stop_spead(self):
-        self._receive_done.set()
+        self._rx.stop()
 
     @asyncio.coroutine
     def do_capture(self):
@@ -171,9 +170,6 @@ class FlagWriterServer(DeviceServer):
             while True:
                 heap = yield from(self._rx.get())
                 print("Received heap {}.".format(heap.cnt))
-                if self._receive_done.is_set():
-                    logger.info("Requested halt of capture thread, stopping...")
-                    break
                 if first:
                     logger.info("First flag heap received...")
                     self._status_sensor.set_value(Status.CAPTURING)
@@ -223,8 +219,6 @@ class FlagWriterServer(DeviceServer):
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start an observation"""
-        if self._receive_done.is_set():
-            raise FailReply("Capture thread is shutting down.")
         if capture_block_id in self._capture_block_state:
             raise FailReply("Capture block ID {} is already active".format(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.CAPTURING)
