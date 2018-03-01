@@ -16,11 +16,12 @@ import signal
 import enum
 import json
 import sys
+import asyncio
 from collections import defaultdict
 
 import numpy as np
 import spead2
-import spead2.recv
+import spead2.recv.asyncio
 import katsdptelstate
 import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
@@ -44,18 +45,20 @@ class EnumEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 def _warn_if_positive(value):
-    return katcp.Sensor.WARN if value > 0 else katcp.Sensor.NOMINAL
+    return Sensor.Status.WARN if value > 0 else Sensor.Status.NOMINAL
 
 
 class FlagWriterServer(DeviceServer):
     VERSION = "sdp-flag-writer-0.1"
     BUILD_STATE = "katsdpflagwriter-" + katsdpflagwriter.__version__
 
-    def __init__(self, host, port, loop, endpoints, npy_path, telstate):
+    def __init__(self, host, port, loop, endpoints, flag_interface, npy_path, telstate):
         self._npy_path = npy_path
         self._telstate = telstate
-        self._halt = threading.Event()
+        self._receive_done = threading.Event()
         self._endpoints = endpoints
+        self._interface_address = katsdpservices.get_interface_address(flag_interface)
+        self._n_streams = len(endpoints)
         self._capture_block_state = {}
          # track the status of each capture block we have seen to date
         self._capture_block_stops = defaultdict(int)
@@ -71,7 +74,7 @@ class FlagWriterServer(DeviceServer):
         self._status_sensor = Sensor(Status, "status", "The current status of the flag writer process.")
         self._input_heaps_sensor = Sensor(int, "input-heaps-total", "Number of input heaps captured in this session.", default=0)
         self._input_dumps_sensor = Sensor(int, "input-dumps-total", "Number of complete input dumps captured in this session.", default=0)
-        self._input_incomplete_sensor = Sensor(int, "input-incomplete-total", "Number of heaps dropped due to being incomplete.", default=0, eval_func=_warn_if_positive)
+        self._input_incomplete_sensor = Sensor(int, "input-incomplete-total", "Number of heaps dropped due to being incomplete.", default=0, status_func=_warn_if_positive)
 
         self._input_bytes_sensor = Sensor(int, "input-bytes-total", "Number of payload bytes received in this session.", default=0)
         self._output_objects_sensor = Sensor(str, "output-objects-total", "Number of objects written to disk in this session.", default=0)
@@ -82,20 +85,38 @@ class FlagWriterServer(DeviceServer):
 
         self._build_state_sensor.set_value(self.BUILD_STATE)
         self.sensors.add(self._build_state_sensor)
-        self._device_status_sensor.set_value(DeviceStatus.IDLE)
-        self.sensors.add(self._device_status_sensor)
-        self.sensor.add(self._input_heaps_sensor)
-        self.sensor.add(self._input_incomplete_sensor)
-        self.sensor.add(self._input_bytes_sensor)
-        self.sensor.add(self._last_dump_timestamp_sensor)
-        self.sensor.add(self._capture_block_state_sensor)
+        self._status_sensor.set_value(Status.IDLE)
+        self.sensors.add(self._status_sensor)
+        self.sensors.add(self._input_heaps_sensor)
+        self.sensors.add(self._input_incomplete_sensor)
+        self.sensors.add(self._input_bytes_sensor)
+        self.sensors.add(self._last_dump_timestamp_sensor)
+        self.sensors.add(self._capture_block_state_sensor)
 
-        self._capture_thread = threading.Thread(target=self._do_capture, name='capture')
-        self._capture_thread.start()
-        logger.info("Started flag capture thread.")
+        self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
+                                      max_heaps=2 * self._n_streams,
+                                      ring_heaps=2 * self._n_streams,
+                                      contiguous_only=False)
+
+        # This covers max_heaps, ring_heaps and the arrays sitting in dask_graph
+        n_memory_buffers = 8 * self._n_streams
+        flag_heap_size = (32768 * 8000)
+         # TODO: stop hardcoding this
+        memory_pool = spead2.MemoryPool(flag_heap_size, flag_heap_size + 4096,
+                                        n_memory_buffers, n_memory_buffers)
+        self._rx.set_memory_pool(memory_pool)
+        self._rx.stop_on_stop_item = False
+        for endpoint in self._endpoints:
+            if self._interface_address is not None:
+                self._rx.add_udp_reader(endpoint.host, endpoint.port,
+                                        buffer_size=flag_heap_size + 4096,
+                                        interface_address=self._interface_address)
+            else:
+                self._rx.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
+                                        buffer_size=flag_heap_size + 4096)
 
     def _set_capture_block_state(self, capture_block_id, state):
-        if state == State.DEAD:
+        if state == State.COMPLETE:
             # Remove if present
             self._capture_block_state.pop(capture_block_id, None)
         else:
@@ -136,15 +157,21 @@ class FlagWriterServer(DeviceServer):
             return True
         return False
 
-    def _do_capture(self, capture_stream_name, chunk_info):
+    def stop_spead(self):
+        self._receive_done.set()
+
+    @asyncio.coroutine
+    def do_capture(self):
         n_dumps = 0
         try:
             self._status_sensor.set_value(Status.WAIT_DATA)
             logger.info("Waiting for data...")
             ig = spead2.ItemGroup()
             first = True
-            for heap in self._rx:
-                if self._halt.is_set():
+            while True:
+                heap = yield from(self._rx.get())
+                print("Received heap {}.".format(heap.cnt))
+                if self._receive_done.is_set():
                     logger.info("Requested halt of capture thread, stopping...")
                     break
                 if first:
@@ -155,10 +182,10 @@ class FlagWriterServer(DeviceServer):
                     logger.info("Stop packet received")
                     
                 if isinstance(heap, spead2.recv.IncompleteHeap):
-                    self._logger.warning("dropped incomplete heap %d "
+                    logger.warning("dropped incomplete heap %d "
                             "(received %d/%d bytes of payload)",
                             heap.cnt, heap.received_length, heap.heap_length)
-                    self._input_incomplete_.value += 1
+                    self._input_incomplete_sensor.value += 1
                     updated = {}
                 else:
                     updated = ig.update(heap)
@@ -186,17 +213,17 @@ class FlagWriterServer(DeviceServer):
                     self._input_heaps_sensor.value = n_heaps
                     self._input_bytes_sensor.value = flags.nbytes
         except Exception as err:
-            self._logger.exception(err)
+            logger.exception(err)
             end_status = "error"
         finally:
             self._input_bytes_sensor.value = 0
             self._input_heaps_sensor.value = 0
             self._input_dumps_sensor.value = 0
-            self._status_sensor.value = State.FINISHED
+            self._status_sensor.value = Status.FINISHED
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start an observation"""
-        if self._halt:
+        if self._receive_done.is_set():
             raise FailReply("Capture thread is shutting down.")
         if capture_block_id in self._capture_block_state:
             raise FailReply("Capture block ID {} is already active".format(capture_block_id))
@@ -225,6 +252,7 @@ def on_shutdown(loop, server):
     loop.remove_signal_handler(signal.SIGINT)
     loop.remove_signal_handler(signal.SIGTERM)
      # in case the exit code below borks, we allow shutdown via traditional means
+    server.stop_spead()
     server.halt()
 
 
@@ -232,6 +260,7 @@ async def run(loop, server):
     await server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
+    await server.do_capture()
     await server.join()
 
 
@@ -241,18 +270,15 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    parser.add_argument('--rdb-path', default="/var/kat/data", metavar='RDBPATH',
+    parser.add_argument('--npy-path', default="/var/kat/data", metavar='RDBPATH',
                         help='Root in which to write RDB dumps.')
-    parser.add_argument('--store-s3', dest='store_s3', default=False, action='store_true',
-                        help='Enable storage of RDB dumps in S3')
-    parser.add_argument('--access-key', default="", metavar='ACCESS',
-                        help='S3 access key with write permission to the specified bucket. Default is unauthenticated access')
-    parser.add_argument('--secret-key', default="", metavar='SECRET',
-                        help='S3 secret key for the specified access key. Default is unauthenticated access')
-    parser.add_argument('--s3-host', default='localhost', metavar='HOST',
-                        help='S3 gateway host address [default=%(default)s]')
-    parser.add_argument('--s3-port', default=7480, metavar='PORT',
-                        help='S3 gateway port [default=%(default)s]')
+    parser.add_argument('--flags-spead', default=':7200', metavar='ENDPOINTS',
+                        type=katsdptelstate.endpoint.endpoint_list_parser(7200),
+                        help='Source port/multicast groups for flags SPEAD streams. '
+                             '[default=%(default)s]')
+    parser.add_argument('--flags-interface', metavar='INTERFACE',
+                        help='Network interface to subscribe to for flag streams. '
+                             '[default=auto]')
     parser.add_argument('-p', '--port', type=int, default=2049, metavar='N',
                         help='KATCP host port [default=%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
@@ -260,30 +286,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.rdb_path):
-        logger.error("Specified RDB path, %s, does not exist.", args.rdb_path)
+    if not os.path.exists(args.npy_path):
+        logger.error("Specified NPY path, %s, does not exist.", args.npy_path)
         sys.exit(2)
 
-    boto_dict = None
-    if args.store_s3:
-        boto_dict = make_boto_dict(args)
-        s3_conn = get_s3_connection(boto_dict, fail_on_boto=True)
-        if s3_conn:
-            user_id = s3_conn.get_canonical_user_id()
-            s3_conn.close()
-             # we rebuild the connection each time we want to write a meta-data dump
-            logger.info("Successfully tested connection to S3 endpoint as %s.", user_id)
-        else:
-            logger.warning("S3 endpoint %s:%s not available. Files will only be written locally.", args.s3_host, args.s3_port)
-    else:
-        logger.info("Running in disk only mode. RDB dumps will not be written to S3")
-
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(3)
 
-    server = MetaWriterServer(args.host, args.port, loop, executor, boto_dict, args.rdb_path, args.telstate)
+    server = FlagWriterServer(args.host, args.port, loop, args.flags_spead, args.flags_interface, args.npy_path, args.telstate)
     logger.info("Started meta-data writer server.")
 
     loop.run_until_complete(run(loop, server))
-    executor.shutdown()
     loop.close()
