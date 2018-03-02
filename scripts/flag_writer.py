@@ -104,8 +104,11 @@ class FlagWriterServer(DeviceServer):
 
         # This covers max_heaps, ring_heaps and the arrays sitting in dask_graph
         n_memory_buffers = 8 * self._n_streams
-        flag_heap_size = (32768 * 8000)
-         # TODO: stop hardcoding this
+        try:
+            flag_heap_size = (self.telstate['n_chans'] * self.telstate['n_bls'])
+        except KeyError:
+            logger.error("Unable to find flag sizing params (n_bls and n_chans) for stream {} in telstate.".format(self._flags_name))
+            sys.exit(2)
         memory_pool = spead2.MemoryPool(flag_heap_size, flag_heap_size + 4096,
                                         n_memory_buffers, n_memory_buffers)
         self._rx.set_memory_pool(memory_pool)
