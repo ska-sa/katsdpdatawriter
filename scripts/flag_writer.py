@@ -105,7 +105,7 @@ class FlagWriterServer(DeviceServer):
         # This covers max_heaps, ring_heaps and the arrays sitting in dask_graph
         n_memory_buffers = 8 * self._n_streams
         try:
-            flag_heap_size = (self.telstate['n_chans'] * self.telstate['n_bls'])
+            flag_heap_size = (self._telstate['n_chans'] * self._telstate['n_bls'])
         except KeyError:
             logger.error("Unable to find flag sizing params (n_bls and n_chans) for stream {} in telstate.".format(self._flags_name))
             sys.exit(2)
@@ -170,8 +170,7 @@ class FlagWriterServer(DeviceServer):
     def stop_spead(self):
         self._rx.stop()
 
-    @asyncio.coroutine
-    def do_capture(self):
+    async def do_capture(self):
         n_dumps = 0
         try:
             self._status_sensor.set_value(Status.WAIT_DATA)
@@ -179,7 +178,7 @@ class FlagWriterServer(DeviceServer):
             ig = spead2.ItemGroup()
             first = True
             while True:
-                heap = yield from(self._rx.get())
+                heap = await self._rx.get()
                 print("Received heap {}.".format(heap.cnt))
                 if first:
                     logger.info("First flag heap received...")
