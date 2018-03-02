@@ -55,7 +55,7 @@ class FlagWriterServer(DeviceServer):
     VERSION = "sdp-flag-writer-0.1"
     BUILD_STATE = "katsdpflagwriter-" + katsdpflagwriter.__version__
 
-    def __init__(self, host, port, loop, endpoints, flag_interface, npy_path, telstate):
+    def __init__(self, host, port, loop, endpoints, flag_interface, npy_path, telstate, flags_name):
         self._npy_path = npy_path
         self._telstate = telstate
         self._endpoints = endpoints
@@ -67,6 +67,7 @@ class FlagWriterServer(DeviceServer):
          # track the stops received for each capture block
          # if the number of stops is equal to the number of receiving endpoints
          # then we mark this is done, even if we have not had an explicit capture-done
+        self._flags_name = flags_name
         self._flags = {}
         self._flag_fragments = defaultdict(int)
          # index by capture_block_id and dump_index, stores the count of
@@ -95,6 +96,7 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._last_dump_timestamp_sensor)
         self.sensors.add(self._capture_block_state_sensor)
 
+        
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
                                       max_heaps=2 * self._n_streams,
                                       ring_heaps=2 * self._n_streams,
@@ -151,7 +153,10 @@ class FlagWriterServer(DeviceServer):
 
         # Received a complete flag dump - writing to disk
         if self._flag_fragments[flag_key] >= len(self._endpoints):
-            flag_filename = os.path.join(self._npy_path, capture_block_id, "{}.flag".format(flag_key))
+            dump_key = "{}_{}/{:05d}_00000_00000.npy".format(capture_block_id, self._flags_name, dump_index)
+             # use dask compatible chunking scheme, even though our trailing
+             # axes will always be 0.
+            flag_filename = os.path.join(self._npy_path, capture_block_id, dump_key)
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
             np.save(flag_filename, self._flags.pop(flag_key))
             logger.info("Saved flag array to disk in %s", flag_filename)
@@ -208,7 +213,7 @@ class FlagWriterServer(DeviceServer):
                     if stored:
                         self._output_objects_sensor.value += 1
                     self._input_heaps_sensor.value += 1
-                    self._input_bytes_sensor.value += flags.nbytes
+                    self._input_bytes_sensor.value += flags.nbytes + 20
         except spead2._spead2.Stopped:
             logger.info("SPEAD receiver stopped.")
              # Ctrl-C or halt (stop packets ignored)
@@ -276,7 +281,9 @@ if __name__ == '__main__':
     parser.add_argument('--flags-interface', metavar='INTERFACE',
                         help='Network interface to subscribe to for flag streams. '
                              '[default=auto]')
-    parser.add_argument('-p', '--port', type=int, default=2049, metavar='N',
+    parser.add_argument('--flags-name', type=str, default='sdp_l1_flags',
+                        help='name for the flags stream. [default=%(default)s]', metavar='NAME')
+    parser.add_argument('-p', '--port', type=int, default=2050, metavar='N',
                         help='KATCP host port [default=%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='KATCP host address [default=all hosts]')
@@ -289,7 +296,8 @@ if __name__ == '__main__':
 
     loop = asyncio.get_event_loop()
 
-    server = FlagWriterServer(args.host, args.port, loop, args.flags_spead, args.flags_interface, args.npy_path, args.telstate)
+    telstate_flags = args.telstate.view(args.flags_name)
+    server = FlagWriterServer(args.host, args.port, loop, args.flags_spead, args.flags_interface, args.npy_path, telstate_flags, args.flags_name)
     logger.info("Started meta-data writer server.")
 
     loop.run_until_complete(run(loop, server))
