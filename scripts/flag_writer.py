@@ -286,7 +286,7 @@ if __name__ == '__main__':
                              '[default=auto]')
     parser.add_argument('--flags-name', type=str, default='sdp_l1_flags',
                         help='name for the flags stream. [default=%(default)s]', metavar='NAME')
-    parser.add_argument('-p', '--port', type=int, default=2050, metavar='N',
+    parser.add_argument('-p', '--port', type=int, default=2052, metavar='N',
                         help='KATCP host port [default=%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='KATCP host address [default=all hosts]')
