@@ -276,14 +276,14 @@ if __name__ == '__main__':
     parser = katsdpservices.ArgumentParser()
     parser.add_argument('--npy-path', default="/var/kat/data", metavar='RDBPATH',
                         help='Root in which to write RDB dumps.')
-    parser.add_argument('--flags-spead', default=':7200', metavar='ENDPOINTS',
+    parser.add_argument('--l1-flags-spead', default=':7200', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7200),
                         help='Source port/multicast groups for flags SPEAD streams. '
                              '[default=%(default)s]')
-    parser.add_argument('--flags-interface', metavar='INTERFACE',
+    parser.add_argument('--l1-flags-interface', metavar='INTERFACE',
                         help='Network interface to subscribe to for flag streams. '
                              '[default=auto]')
-    parser.add_argument('--flags-name', type=str, default='sdp_l1_flags',
+    parser.add_argument('--l1-flags-name', type=str, default='sdp_l1_flags',
                         help='name for the flags stream. [default=%(default)s]', metavar='NAME')
     parser.add_argument('-p', '--port', type=int, default=2052, metavar='N',
                         help='KATCP host port [default=%(default)s]')
@@ -299,7 +299,7 @@ if __name__ == '__main__':
     loop = asyncio.get_event_loop()
 
     telstate_flags = args.telstate.view(args.flags_name)
-    server = FlagWriterServer(args.host, args.port, loop, args.flags_spead, args.flags_interface, args.npy_path, telstate_flags, args.flags_name)
+    server = FlagWriterServer(args.host, args.port, loop, args.l1_flags_spead, args.l1_flags_interface, args.npy_path, telstate_flags, args.l1_flags_name)
     logger.info("Started meta-data writer server.")
 
     loop.run_until_complete(run(loop, server))
