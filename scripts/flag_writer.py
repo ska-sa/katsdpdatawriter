@@ -159,7 +159,7 @@ class FlagWriterServer(DeviceServer):
             dump_key = "{}_{}/{:05d}_00000_00000.npy".format(capture_block_id, self._flags_name, dump_index)
              # use dask compatible chunking scheme, even though our trailing
              # axes will always be 0.
-            flag_filename = os.path.join(self._npy_path, capture_block_id, dump_key)
+            flag_filename = os.path.join(self._npy_path, capture_block_id, "_", self._flags_name, dump_key)
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
             np.save(flag_filename, self._flags.pop(flag_key))
             logger.info("Saved flag array to disk in %s", flag_filename)
@@ -236,7 +236,7 @@ class FlagWriterServer(DeviceServer):
     def _mark_cbid_complete(self, capture_block_id):
         """Inform other users of the on disk data that we are finished with a
         particular capture_block_id."""
-        touch_file = os.path.join(self._npy_path, capture_block_id, "flags_complete")
+        touch_file = os.path.join(self._npy_path, capture_block_id, "{}_complete".format(self._flags_name))
         os.makedirs(os.path.dirname(touch_file), exist_ok=True)
         with open(touch_file, 'a'):
             os.utime(touch_file, None)
