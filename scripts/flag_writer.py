@@ -134,11 +134,6 @@ class FlagWriterServer(DeviceServer):
     def _get_capture_block_state(self, capture_block_id):
         return self._capture_block_state.get(capture_block_id, None)
 
-    async def write_meta(self, ctx, capture_block_id, streams, lite=True):
-        """Implementation of request_write_meta."""
-        rate_per_stream = {}
-        return rate_per_stream
-
     def _add_flags(self, flags, capture_block_id, dump_index, channel0):
         """Add the flag fragment into an appropriate data structure
         and if a particular cbid / dump_index combination is complete,
@@ -156,10 +151,10 @@ class FlagWriterServer(DeviceServer):
 
         # Received a complete flag dump - writing to disk
         if self._flag_fragments[flag_key] >= len(self._endpoints):
-            dump_key = "{}_{}/{:05d}_00000_00000.npy".format(capture_block_id, self._flags_name, dump_index)
+            dump_key = "flags/{:05d}_00000_00000.npy".format(dump_index)
              # use dask compatible chunking scheme, even though our trailing
              # axes will always be 0.
-            flag_filename = os.path.join(self._npy_path, capture_block_id, "_", self._flags_name, dump_key)
+            flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
             np.save(flag_filename, self._flags.pop(flag_key))
             logger.info("Saved flag array to disk in %s", flag_filename)
@@ -270,7 +265,7 @@ async def run(loop, server):
 
 if __name__ == '__main__':
     katsdpservices.setup_logging()
-    logger = logging.getLogger("katsdpmetawriter")
+    logger = logging.getLogger("katsdpflagwriter")
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
@@ -300,7 +295,7 @@ if __name__ == '__main__':
 
     telstate_flags = args.telstate.view(args.flags_name)
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead, args.flags_interface, args.npy_path, telstate_flags, args.flags_name)
-    logger.info("Started meta-data writer server.")
+    logger.info("Started flag writer server.")
 
     loop.run_until_complete(run(loop, server))
     loop.close()
