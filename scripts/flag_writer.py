@@ -75,37 +75,44 @@ class FlagWriterServer(DeviceServer):
 
         self._build_state_sensor = Sensor(str, "build-state", "SDP Flag Writer build state.")
         self._status_sensor = Sensor(Status, "status", "The current status of the flag writer process.")
-        self._input_heaps_sensor = Sensor(int, "input-heaps-total", "Number of input heaps captured in this session.", default=0)
-        self._input_dumps_sensor = Sensor(int, "input-dumps-total", "Number of complete input dumps captured in this session.", default=0)
-        self._input_incomplete_sensor = Sensor(int, "input-incomplete-total", "Number of heaps dropped due to being incomplete.", default=0, status_func=_warn_if_positive)
-
-        self._input_bytes_sensor = Sensor(int, "input-bytes-total", "Number of payload bytes received in this session.", default=0)
-        self._output_objects_sensor = Sensor(str, "output-objects-total", "Number of objects written to disk in this session.", default=0)
+        self._input_heaps_sensor = Sensor(int, "input-heaps-total",
+                                          "Number of input heaps captured in this session.")
+        self._input_dumps_sensor = Sensor(int, "input-dumps-total",
+                                          "Number of complete input dumps captured in this session.")
+        self._input_incomplete_sensor = Sensor(int, "input-incomplete-heaps-total",
+                                               "Number of heaps dropped due to being incomplete.",
+                                               status_func=_warn_if_positive)
+        self._input_bytes_sensor = Sensor(int, "input-bytes-total",
+                                          "Number of payload bytes received in this session.")
+        self._output_objects_sensor = Sensor(str, "output-objects-total",
+                                             "Number of objects written to disk in this session.")
         self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
-        self._capture_block_state_sensor = Sensor(str, "capture-block-state", "JSON dict with the state of each capture block seen in this session.", default='{}')
+        self._capture_block_state_sensor = Sensor(str, "capture-block-state",
+                                                  "JSON dict with the state of each capture block seen in this session.",
+                                                  default='{}')
 
         super().__init__(host, port, loop=loop)
 
-        self._build_state_sensor.set_value(self.BUILD_STATE)
+        self._build_state_sensor.value = self.BUILD_STATE
         self.sensors.add(self._build_state_sensor)
-        self._status_sensor.set_value(Status.IDLE)
+        self._status_sensor.value = Status.IDLE
         self.sensors.add(self._status_sensor)
         self.sensors.add(self._input_heaps_sensor)
+        self.sensors.add(self._input_dumps_sensor)
         self.sensors.add(self._input_incomplete_sensor)
         self.sensors.add(self._input_bytes_sensor)
+        self.sensors.add(self._output_objects_sensor)
         self.sensors.add(self._last_dump_timestamp_sensor)
         self.sensors.add(self._capture_block_state_sensor)
-
         
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
-                                      max_heaps=2 * self._n_streams,
-                                      ring_heaps=2 * self._n_streams,
-                                      contiguous_only=False)
+                                              max_heaps=2 * self._n_streams,
+                                              ring_heaps=2 * self._n_streams,
+                                              contiguous_only=False)
 
-        # This covers max_heaps, ring_heaps and the arrays sitting in dask_graph
         n_memory_buffers = 8 * self._n_streams
         try:
-            flag_heap_size = (self._telstate['n_chans'] * self._telstate['n_bls'])
+            flag_heap_size = self._telstate['n_chans_per_substream'] * self._telstate['n_bls']
         except KeyError:
             logger.error("Unable to find flag sizing params (n_bls and n_chans) for stream {} in telstate.".format(self._flags_name))
             sys.exit(2)
@@ -129,7 +136,7 @@ class FlagWriterServer(DeviceServer):
         else:
             self._capture_block_state[capture_block_id] = state
         dumped = json.dumps(self._capture_block_state, sort_keys=True, cls=EnumEncoder)
-        self._capture_block_state_sensor.set_value(dumped)
+        self._capture_block_state_sensor.value = dumped
 
     def _get_capture_block_state(self, capture_block_id):
         return self._capture_block_state.get(capture_block_id, None)
@@ -141,10 +148,17 @@ class FlagWriterServer(DeviceServer):
 
         We test completion by checking that the len(self._endpoints)
         fragments have arrived.
+
+        Returns
+        -------
+        bool
+            If True then this fragment completed a full dump and an attempt
+            was made to write this to disk. If the write failed we log
+            an error, but opt to bumble on.
         """
         flag_key = "{}_{}".format(capture_block_id, dump_index)
         if flag_key not in self._flags:
-            self._flags[flag_key] = np.zeros((len(self._endpoints) * flags.shape[0], flags.shape[1]))
+            self._flags[flag_key] = np.zeros((telstate['n_chans'], telstate['n_bls']))
 
         self._flags[flag_key][channel0:channel0 + flags.shape[0]] = flags
         self._flag_fragments[flag_key] += 1
@@ -152,12 +166,15 @@ class FlagWriterServer(DeviceServer):
         # Received a complete flag dump - writing to disk
         if self._flag_fragments[flag_key] >= len(self._endpoints):
             dump_key = "flags/{:05d}_00000_00000.npy".format(dump_index)
-             # use dask compatible chunking scheme, even though our trailing
+             # use ChunkStore compatible chunking scheme, even though our trailing
              # axes will always be 0.
             flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
-            os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
-            np.save(flag_filename, self._flags.pop(flag_key))
-            logger.info("Saved flag array to disk in %s", flag_filename)
+            try:
+                os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
+                np.save(flag_filename, self._flags.pop(flag_key))
+                logger.info("Saved flag array to disk in %s", flag_filename)
+            except OSError:
+                logger.error("Failed to save flag array to %s", flag_filename)
             self._flag_fragments.pop(flag_key)
             return True
         return False
@@ -168,23 +185,23 @@ class FlagWriterServer(DeviceServer):
     async def do_capture(self):
         n_dumps = 0
         try:
-            self._status_sensor.set_value(Status.WAIT_DATA)
+            self._status_sensor.value = Status.WAIT_DATA
             logger.info("Waiting for data...")
             ig = spead2.ItemGroup()
             first = True
             while True:
                 heap = await self._rx.get()
-                print("Received heap {}.".format(heap.cnt))
                 if first:
                     logger.info("First flag heap received...")
-                    self._status_sensor.set_value(Status.CAPTURING)
+                    self._status_sensor.value = Status.CAPTURING
                     first = False
                 if heap.is_end_of_stream():
                     logger.info("Stop packet received")
                 if isinstance(heap, spead2.recv.IncompleteHeap):
-                    logger.warning("dropped incomplete heap %d "
-                            "(received %d/%d bytes of payload)",
-                            heap.cnt, heap.received_length, heap.heap_length)
+                    if self._input_incomplete_sensor.value % 100 == 0:
+                        logger.warning("dropped incomplete heap %d "
+                                       "(received %d/%d bytes of payload)",
+                                       heap.cnt, heap.received_length, heap.heap_length)
                     self._input_incomplete_sensor.value += 1
                     updated = {}
                 else:
@@ -197,7 +214,7 @@ class FlagWriterServer(DeviceServer):
                     cbid = ig['capture_block_id'].value
                     cur_state = self._get_capture_block_state(cbid)
                     if cur_state == State.COMPLETE:
-                        logger.error("Recieved flags for CBID {} after capture done. These flags will be *discarded*.")
+                        logger.error("Received flags for CBID {} after capture done. These flags will be *discarded*.")
                         continue
                     elif not cur_state:
                         logger.warning("Received flags for CBID {} unexpectedly (before an init).")
@@ -211,11 +228,11 @@ class FlagWriterServer(DeviceServer):
                         self._output_objects_sensor.value += 1
                     self._input_heaps_sensor.value += 1
                     self._input_bytes_sensor.value += flags.nbytes + 20
-        except spead2._spead2.Stopped:
+        except spead2.Stopped:
             logger.info("SPEAD receiver stopped.")
              # Ctrl-C or halt (stop packets ignored)
-        except Exception as err:
-            logger.exception(err)
+        except Exception:
+            logger.exception("Error in SPEAD receiver")
         finally:
             self._input_bytes_sensor.value = 0
             self._input_heaps_sensor.value = 0
@@ -230,7 +247,8 @@ class FlagWriterServer(DeviceServer):
 
     def _mark_cbid_complete(self, capture_block_id):
         """Inform other users of the on disk data that we are finished with a
-        particular capture_block_id."""
+        particular capture_block_id.
+        """
         touch_file = os.path.join(self._npy_path, capture_block_id, "{}_complete".format(self._flags_name))
         os.makedirs(os.path.dirname(touch_file), exist_ok=True)
         with open(touch_file, 'a'):
@@ -239,11 +257,10 @@ class FlagWriterServer(DeviceServer):
 
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:
         """Notice to mark specified capture_block_id as complete and inform
-        downstream services of completion."""
+        downstream services of completion.
+        """
         if capture_block_id not in self._capture_block_state:
-            raise FailReply("Specified capture block ID {} is unkown.".format(capture_block_id))
-        if self._capture_block_state[capture_block_id] != State.CAPTURING:
-            raise FailReply("Specified capture block ID {} is not in state capturing.".format(capture_block_id))
+            raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
         self._mark_cbid_complete(capture_block_id)
 
 
@@ -269,9 +286,9 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    parser.add_argument('--npy-path', default="/var/kat/data", metavar='RDBPATH',
-                        help='Root in which to write RDB dumps.')
-    parser.add_argument('--flags-spead', default=':7200', metavar='ENDPOINTS',
+    parser.add_argument('--npy-path', default="/var/kat/data", metavar='NPYPATH',
+                        help='Root in which to write flag dumps in npy format.')
+    parser.add_argument('--flags-spead', default=':7202', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7200),
                         help='Source port/multicast groups for flags SPEAD streams. '
                              '[default=%(default)s]')
@@ -287,14 +304,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.npy_path):
+    if not os.path.isdir(args.npy_path):
         logger.error("Specified NPY path, %s, does not exist.", args.npy_path)
         sys.exit(2)
 
     loop = asyncio.get_event_loop()
 
     telstate_flags = args.telstate.view(args.flags_name)
-    server = FlagWriterServer(args.host, args.port, loop, args.flags_spead, args.flags_interface, args.npy_path, telstate_flags, args.flags_name)
+    server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
+                              args.flags_interface, args.npy_path,
+                              telstate_flags, args.flags_name)
     logger.info("Started flag writer server.")
 
     loop.run_until_complete(run(loop, server))
