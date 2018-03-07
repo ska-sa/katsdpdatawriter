@@ -278,8 +278,7 @@ class FlagWriterServer(DeviceServer):
                         self._input_dumps_sensor.value = n_dumps
                     self._add_flags(flags, cbid, dump_index, channel0)
                     self._input_heaps_sensor.value += 1
-                    # Overhead: 8 for cbid, 8 for timestamp, 8 for dump_index, 4 for channel
-                    self._input_bytes_sensor.value += flags.nbytes + 28
+                    self._input_bytes_sensor.value += flags.nbytes
         except spead2.Stopped:
             logger.info("SPEAD receiver stopped.")
              # Ctrl-C or halt (stop packets ignored)
