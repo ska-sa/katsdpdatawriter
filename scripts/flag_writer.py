@@ -27,9 +27,9 @@ import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdpflagwriter
 
-# Multiple of flag int_time to keep. Partial flag heaps
-# older than int_time * FLAG_CACHE_LOOKBACK will be discarded
-FLAG_CACHE_LOOKBACK = 5
+# Number of partial flag heaps to cache. Once full, heaps
+# will be discarded oldest arrival time first.
+FLAG_CACHE_SIZE = 10
 
 class Status(enum.Enum):
     IDLE = 1
@@ -192,7 +192,7 @@ class FlagWriterServer(DeviceServer):
         # Add flag fragment to the FlagItem, and if complete write to disk
         if self._flags[flag_key].add_fragment(flags, channel0):
             self._store_flags(flag_key)
-        self._check_fragments()
+        self._check_cache()
 
     def _store_flags(self, flag_key):
         (capture_block_id, dump_index) = flag_key.split("_")
@@ -216,18 +216,20 @@ class FlagWriterServer(DeviceServer):
             # If we fail to save, log the error, but discard dump and bumble on
             logger.error("Failed to flag dump to %s", flag_filename)
 
-    def _check_fragments(self, store_all=False):
-        """Check the flag fragment cache for older dumps that are
-        likely to remain incomplete for all time and thus should be
-        aged out and stored. Any complete dumps that have been previously missed
-        should also be stored.
+    def _check_cache(self, store_all=False):
+        """Check the depth of the flag fragment cache and flush
+        and the oldest N dumps that make the cache larger than
+        FLAG_CACHE_SIZE.
         """
-        to_store = []
-        for flag_key, flag_item in self._flags.items():
-            if store_all or (flag_item.is_complete() or flag_item.started < (self._int_time * FLAG_CACHE_LOOKBACK)):
-                to_store.append(flag_key)
+        if store_all:
+            to_flush = [k for k in self._flags]
+            logger.info("Flushing all flag heaps (%d) to disk.", len(to_flush))
+        elif len(self._flags) >= FLAG_CACHE_SIZE:
+            ordered_keys = sorted([k for k in self._flags], key=lambda k: self._flags[k].started)
+            to_flush = ordered_keys[FLAG_CACHE_SIZE:]
+            logger.warning("Flushing %d old flag heaps to disk to maintain cache depth.", len(to_flush))
 
-        for flag_key in to_store:
+        for flag_key in to_flush:
             self._store_flags(flag_key)
 
     def stop_spead(self):
@@ -314,7 +316,7 @@ class FlagWriterServer(DeviceServer):
         # Allow some time for stragglers to appear before committing all remaining
         # flags to disk.
         await asyncio.sleep(5, loop=self.loop)
-        self._check_fragments(store_all=True)
+        self._check_cache(store_all=True)
         self._mark_cbid_complete(capture_block_id)
 
 
