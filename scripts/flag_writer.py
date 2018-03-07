@@ -26,7 +26,9 @@ import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdpflagwriter
 
-FLAGS
+# Multiple of flag int_time to keep. Partial flag heaps
+# older than int_time * FLAG_CACHE_LOOKBACK will be discarded
+FLAG_CACHE_LOOKBACK = 5
 
 class Status(enum.Enum):
     IDLE = 1
@@ -46,6 +48,24 @@ class EnumEncoder(json.JSONEncoder):
         if isinstance(obj, enum.Enum):
             return obj.name
         return json.JSONEncoder.default(self, obj)
+
+
+class FlagItem():
+    def __init__(self, shape_tuple, completed_fragment_count):
+        self._flags = np.zeros(shape_tuple, dtype=np.int8)
+        # Init with no data flag
+        self._flags[:] = 0b00001000
+        self._fragment_count = 0
+        self._completed_fragment_count = completed_fragment_count
+        self.started = time.time()
+
+    def is_complete(self):
+        return self._fragment_count >= self._completed_fragment_count
+
+    def add_fragment(self, flag_fragment, offset):
+        self._flags[offset:offset + flag_fragment.shape[0]] = flag_fragment
+        self._fragment_count += 1
+        return self.is_complete()
 
 
 def _warn_if_positive(value):
@@ -114,8 +134,9 @@ class FlagWriterServer(DeviceServer):
         n_memory_buffers = 8 * self._n_streams
         try:
             flag_heap_size = self._telstate['n_chans_per_substream'] * self._telstate['n_bls']
+            self._int_time = self._telstate['int_time']
         except KeyError:
-            logger.error("Unable to find flag sizing params (n_bls and n_chans) for stream {} in telstate.".format(self._flags_name))
+            logger.error("Unable to find flag sizing params (n_bls and n_chans) or int_time for stream {} in telstate.".format(self._flags_name))
             raise
         memory_pool = spead2.MemoryPool(flag_heap_size, flag_heap_size + 4096,
                                         n_memory_buffers, n_memory_buffers)
@@ -159,28 +180,46 @@ class FlagWriterServer(DeviceServer):
         """
         flag_key = "{}_{}".format(capture_block_id, dump_index)
         if flag_key not in self._flags:
-            self._flags[flag_key] = np.zeros((telstate['n_chans'], telstate['n_bls']), dtype=np.int8)
-            # Init with no data flag
-            self._flags[flag_key][:] = 0b00001000
+            self._flags[flag_key] = FlagItem((telstate['n_chans'], telstate['n_bls']), len(self._endpoints))
 
-        self._flags[flag_key][channel0:channel0 + flags.shape[0]] = flags
-        self._flag_fragments[flag_key] += 1
+        # Add flag fragment to the FlagItem, and if complete write to disk
+        if self._flags[flag_key].add_fragment(flags, channel0):
+            self._store_flags(flag_key)
+        self._check_fragments()
 
-        # Received a complete flag dump - writing to disk
-        if self._flag_fragments[flag_key] >= len(self._endpoints):
-            dump_key = "flags/{:05d}_00000_00000.npy".format(dump_index)
-             # use ChunkStore compatible chunking scheme, even though our trailing
-             # axes will always be 0.
-            flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
-            try:
-                os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
-                np.save(flag_filename, self._flags.pop(flag_key))
-                logger.info("Saved flag array to disk in %s", flag_filename)
-            except OSError:
-                logger.error("Failed to save flag array to %s", flag_filename)
-            self._flag_fragments.pop(flag_key)
-            return True
-        return False
+    def _store_flags(self, flag_key):
+        (capture_block_id, dump_index) = flag_key.split("_")
+        dump_key = "flags/{:05d}_00000_00000.npy".format(dump_index)
+         # use ChunkStore compatible chunking scheme, even though our trailing
+         # axes will always be 0.
+        flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
+        completed_flag_dump = self._flags.pop(flag_key)
+        try:
+            os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
+            np.save(flag_filename, completed_flag_dump)
+            logger.info("Saved flag array to disk in %s", flag_filename)
+            self._output_objects_sensor.value += 1
+        except OSError:
+            # If we fail to save, log the error, but discard dump and bumble on
+            logger.error("Failed to save flag array to %s", flag_filename)
+
+    def _check_fragments(self):
+        """Check the flag fragment cache for older dumps that are
+        likely to remain incomplete for all time and thus should be
+        aged out. Any complete dumps that have been previously missed
+        should also be sent.
+        """
+        to_remove = []
+        for flag_key, flag_item in self._flags.items():
+            if flag_item.is_complete():
+                self._store_flags(flag_key)
+                continue
+            if flag_item.started < (self._int_time * FLAG_CACHE_LOOKBACK):
+                to_remove.append(flag_key)
+
+        for flag_key in to_remove:
+            logger.warning("Removed incomplete flag dump %s as it is older than the lookback time", flag_key)
+            self._flags.pop(flag_key)
 
     def stop_spead(self):
         self._rx.stop()
@@ -226,9 +265,7 @@ class FlagWriterServer(DeviceServer):
                     if dump_index >= n_dumps:
                         n_dumps = dump_index + 1
                         self._input_dumps_sensor.value = n_dumps
-                    stored = self._add_flags(flags, cbid, dump_index, channel0)
-                    if stored:
-                        self._output_objects_sensor.value += 1
+                    self._add_flags(flags, cbid, dump_index, channel0)
                     self._input_heaps_sensor.value += 1
                     self._input_bytes_sensor.value += flags.nbytes + 20
         except spead2.Stopped:
@@ -292,7 +329,7 @@ if __name__ == '__main__':
     parser.add_argument('--npy-path', default="/var/kat/data", metavar='NPYPATH',
                         help='Root in which to write flag dumps in npy format.')
     parser.add_argument('--flags-spead', default=':7202', metavar='ENDPOINTS',
-                        type=katsdptelstate.endpoint.endpoint_list_parser(7200),
+                        type=katsdptelstate.endpoint.endpoint_list_parser(7202),
                         help='Source port/multicast groups for flags SPEAD streams. '
                              '[default=%(default)s]')
     parser.add_argument('--flags-interface', metavar='INTERFACE',
