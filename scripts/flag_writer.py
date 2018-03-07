@@ -106,8 +106,10 @@ class FlagWriterServer(DeviceServer):
                                                status_func=_warn_if_positive)
         self._input_bytes_sensor = Sensor(int, "input-bytes-total",
                                           "Number of payload bytes received in this session.")
-        self._output_objects_sensor = Sensor(str, "output-objects-total",
+        self._output_objects_sensor = Sensor(int, "output-objects-total",
                                              "Number of objects written to disk in this session.")
+        self._input_discarded_dumps_sensor = Sensor(int, "input-discarded-dumps-total",
+                                                          "Number of dumps discarded due to not receiving all fragments in time.")
         self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
         self._capture_block_state_sensor = Sensor(str, "capture-block-state",
                                                   "JSON dict with the state of each capture block seen in this session.",
@@ -122,6 +124,7 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._input_heaps_sensor)
         self.sensors.add(self._input_dumps_sensor)
         self.sensors.add(self._input_incomplete_sensor)
+        self.sensors.add(self._input_discarded_dumps_sensor)
         self.sensors.add(self._input_bytes_sensor)
         self.sensors.add(self._output_objects_sensor)
         self.sensors.add(self._last_dump_timestamp_sensor)
@@ -224,6 +227,7 @@ class FlagWriterServer(DeviceServer):
         for flag_key in to_remove:
             logger.warning("Removed incomplete flag dump %s as it is older than the lookback time", flag_key)
             self._flags.pop(flag_key)
+            self._input_discarded_dumps_sensor.value += 1
 
     def stop_spead(self):
         self._rx.stop()
