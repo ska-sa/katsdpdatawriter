@@ -133,10 +133,13 @@ class FlagWriterServer(DeviceServer):
 
         n_memory_buffers = 8 * self._n_streams
         try:
-            flag_heap_size = self._telstate['n_chans_per_substream'] * self._telstate['n_bls']
+            self._n_chans = self._telstate['n_chans']
+            self._n_bls = self._telstate['n_bls']
             self._int_time = self._telstate['int_time']
+            flag_heap_size = self._telstate['n_chans_per_substream'] * self._n_bls
         except KeyError:
-            logger.error("Unable to find flag sizing params (n_bls and n_chans) or int_time for stream {} in telstate.".format(self._flags_name))
+            logger.error("Unable to find flag sizing params (n_bls, n_chans, int_time or n_chans_per_substream) for stream {} in telstate."
+                         .format(self._flags_name))
             raise
         memory_pool = spead2.MemoryPool(flag_heap_size, flag_heap_size + 4096,
                                         n_memory_buffers, n_memory_buffers)
@@ -180,7 +183,7 @@ class FlagWriterServer(DeviceServer):
         """
         flag_key = "{}_{}".format(capture_block_id, dump_index)
         if flag_key not in self._flags:
-            self._flags[flag_key] = FlagItem((telstate['n_chans'], telstate['n_bls']), len(self._endpoints))
+            self._flags[flag_key] = FlagItem((self._n_chans, self._n_bls), len(self._endpoints))
 
         # Add flag fragment to the FlagItem, and if complete write to disk
         if self._flags[flag_key].add_fragment(flags, channel0):
