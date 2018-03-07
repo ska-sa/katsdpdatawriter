@@ -53,7 +53,7 @@ class EnumEncoder(json.JSONEncoder):
 
 class FlagItem():
     def __init__(self, shape_tuple, completed_fragment_count):
-        self._flags = np.zeros(shape_tuple, dtype=np.int8)
+        self._flags = np.empty(shape_tuple, dtype=np.int8)
         # Init with no data flag
         self._flags[:] = 0b00001000
         self._fragment_count = 0
@@ -109,7 +109,7 @@ class FlagWriterServer(DeviceServer):
         self._output_objects_sensor = Sensor(int, "output-objects-total",
                                              "Number of objects written to disk in this session.")
         self._input_partial_dumps_sensor = Sensor(int, "input-partial-dumps-total",
-                                                          "Number of partial dumps stored (due to age or early done).")
+                                                  "Number of partial dumps stored (due to age or early done).")
         self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
         self._capture_block_state_sensor = Sensor(str, "capture-block-state",
                                                   "JSON dict with the state of each capture block seen in this session.",
@@ -204,7 +204,7 @@ class FlagWriterServer(DeviceServer):
 
         completed_flag_dump = self._flags.pop(flag_key)
         if not completed_flag_dump.is_complete():
-            logger.warning("Storing partially complete flag dump {}", flag_key)
+            logger.warning("Storing partially complete flag dump %s", flag_key)
             self._input_partial_dumps_sensor.value += 1
 
         try:
@@ -265,10 +265,10 @@ class FlagWriterServer(DeviceServer):
                     cbid = ig['capture_block_id'].value
                     cur_state = self._get_capture_block_state(cbid)
                     if cur_state == State.COMPLETE:
-                        logger.error("Received flags for CBID {} after capture done. These flags will be *discarded*.")
+                        logger.error("Received flags for CBID %s after capture done. These flags will be *discarded*.", cbid)
                         continue
                     elif not cur_state:
-                        logger.warning("Received flags for CBID {} unexpectedly (before an init).")
+                        logger.warning("Received flags for CBID %s unexpectedly (before an init).", cbid)
                         self._set_capture_block_state(cbid, State.CAPTURING)
 
                     if dump_index >= n_dumps:
@@ -307,8 +307,7 @@ class FlagWriterServer(DeviceServer):
         self._set_capture_block_state(capture_block_id, State.COMPLETE)
 
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:
-        """Notice to mark specified capture_block_id as complete and inform
-        downstream services of completion.
+        """Mark specified capture_block_id as complete and flush flag cache.
         """
         if capture_block_id not in self._capture_block_state:
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
