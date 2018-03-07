@@ -225,7 +225,7 @@ class FlagWriterServer(DeviceServer):
             to_flush = [k for k in self._flags]
             logger.info("Flushing all flag heaps (%d) to disk.", len(to_flush))
         elif len(self._flags) >= FLAG_CACHE_SIZE:
-            ordered_keys = sorted([k for k in self._flags], key=lambda k: self._flags[k].started)
+            ordered_keys = sorted([k for k in self._flags], key=lambda k: self._flags[k].started, reverse=True)
             to_flush = ordered_keys[FLAG_CACHE_SIZE:]
             logger.warning("Flushing %d old flag heaps to disk to maintain cache depth.", len(to_flush))
 
