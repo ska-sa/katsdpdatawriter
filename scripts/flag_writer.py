@@ -26,6 +26,7 @@ import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdpflagwriter
 
+FLAGS
 
 class Status(enum.Enum):
     IDLE = 1
@@ -115,7 +116,7 @@ class FlagWriterServer(DeviceServer):
             flag_heap_size = self._telstate['n_chans_per_substream'] * self._telstate['n_bls']
         except KeyError:
             logger.error("Unable to find flag sizing params (n_bls and n_chans) for stream {} in telstate.".format(self._flags_name))
-            sys.exit(2)
+            raise
         memory_pool = spead2.MemoryPool(flag_heap_size, flag_heap_size + 4096,
                                         n_memory_buffers, n_memory_buffers)
         self._rx.set_memory_pool(memory_pool)
@@ -158,7 +159,9 @@ class FlagWriterServer(DeviceServer):
         """
         flag_key = "{}_{}".format(capture_block_id, dump_index)
         if flag_key not in self._flags:
-            self._flags[flag_key] = np.zeros((telstate['n_chans'], telstate['n_bls']))
+            self._flags[flag_key] = np.zeros((telstate['n_chans'], telstate['n_bls']), dtype=np.int8)
+            # Init with no data flag
+            self._flags[flag_key][:] = 0b00001000
 
         self._flags[flag_key][channel0:channel0 + flags.shape[0]] = flags
         self._flag_fragments[flag_key] += 1
