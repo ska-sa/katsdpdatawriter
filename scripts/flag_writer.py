@@ -297,6 +297,7 @@ class FlagWriterServer(DeviceServer):
         """Inform other users of the on disk data that we are finished with a
         particular capture_block_id.
         """
+        logger.info("Capture block %s flag capture complete.", capture_block_id)
         touch_file = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name),
                                   "{}_complete".format(self._flags_name))
         os.makedirs(os.path.dirname(touch_file), exist_ok=True)
