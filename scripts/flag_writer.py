@@ -193,7 +193,7 @@ class FlagWriterServer(DeviceServer):
 
     def _store_flags(self, flag_key):
         (capture_block_id, dump_index) = flag_key.split("_")
-        dump_key = "flags/{:05d}_00000_00000.npy".format(dump_index)
+        dump_key = "flags/{:05d}_00000_00000.npy".format(int(dump_index))
          # use ChunkStore compatible chunking scheme, even though our trailing
          # axes will always be 0.
         flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
