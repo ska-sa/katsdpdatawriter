@@ -196,38 +196,39 @@ class FlagWriterServer(DeviceServer):
 
     def _store_flags(self, flag_key):
         (capture_block_id, dump_index) = flag_key.split("_")
+
+        # use ChunkStore compatible chunking scheme, even though our trailing
+        # axes will always be 0.
         dump_key = "flags/{:05d}_00000_00000.npy".format(int(dump_index))
-         # use ChunkStore compatible chunking scheme, even though our trailing
-         # axes will always be 0.
         flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
+
         completed_flag_dump = self._flags.pop(flag_key)
+        if not completed_flag_dump.is_complete():
+            logger.warning("Storing partially complete flag dump {}", flag_key)
+            self._input_partial_dumps_sensor.value += 1
+
         try:
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
             np.save(flag_filename, completed_flag_dump)
-            logger.info("Saved flag array to disk in %s", flag_filename)
+            logger.info("Saved flag dump to disk in %s", flag_filename)
             self._output_objects_sensor.value += 1
         except OSError:
             # If we fail to save, log the error, but discard dump and bumble on
-            logger.error("Failed to save flag array to %s", flag_filename)
+            logger.error("Failed to flag dump to %s", flag_filename)
 
-    def _check_fragments(self):
+    def _check_fragments(self, store_all=False):
         """Check the flag fragment cache for older dumps that are
         likely to remain incomplete for all time and thus should be
-        aged out. Any complete dumps that have been previously missed
-        should also be sent.
+        aged out and stored. Any complete dumps that have been previously missed
+        should also be stored.
         """
-        to_remove = []
+        to_store = []
         for flag_key, flag_item in self._flags.items():
-            if flag_item.is_complete():
-                self._store_flags(flag_key)
-                continue
-            if flag_item.started < (self._int_time * FLAG_CACHE_LOOKBACK):
-                to_remove.append(flag_key)
+            if store_all or (flag_item.is_complete() or flag_item.started < (self._int_time * FLAG_CACHE_LOOKBACK)):
+                to_store.append(flag_key)
 
-        for flag_key in to_remove:
-            logger.warning("Removed incomplete flag dump %s as it is older than the lookback time", flag_key)
-            self._flags.pop(flag_key)
-            self._input_discarded_dumps_sensor.value += 1
+        for flag_key in to_store:
+            self._store_flags(flag_key)
 
     def stop_spead(self):
         self._rx.stop()
@@ -311,6 +312,10 @@ class FlagWriterServer(DeviceServer):
         """
         if capture_block_id not in self._capture_block_state:
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
+        # Allow some time for stragglers to appear before committing all remaining
+        # flags to disk.
+        await asyncio.sleep(5, loop=self.loop)
+        self._check_fragments(store_all=True)
         self._mark_cbid_complete(capture_block_id)
 
 
