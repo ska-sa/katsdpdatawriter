@@ -221,6 +221,7 @@ class FlagWriterServer(DeviceServer):
         and the oldest N dumps that make the cache larger than
         FLAG_CACHE_SIZE.
         """
+        to_flush = []
         if store_all:
             to_flush = [k for k in self._flags]
             logger.info("Flushing all flag heaps (%d) to disk.", len(to_flush))
