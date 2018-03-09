@@ -209,7 +209,7 @@ class FlagWriterServer(DeviceServer):
 
         try:
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
-            np.save(flag_filename, completed_flag_dump)
+            np.save(flag_filename, completed_flag_dump._flags)
             logger.info("Saved flag dump to disk in %s", flag_filename)
             self._output_objects_sensor.value += 1
         except OSError:
