@@ -56,16 +56,16 @@ class FlagItem():
         self._flags = np.empty(shape_tuple, dtype=np.int8)
         # Init with no data flag
         self._flags[:] = 0b00001000
-        self._fragment_count = 0
+        self._fragment_offsets = []
         self._completed_fragment_count = completed_fragment_count
         self.started = time.time()
 
     def is_complete(self):
-        return self._fragment_count >= self._completed_fragment_count
+        return len(self._fragment_offsets) >= self._completed_fragment_count
 
     def add_fragment(self, flag_fragment, offset):
         self._flags[offset:offset + flag_fragment.shape[0]] = flag_fragment
-        self._fragment_count += 1
+        self._fragment_offsets.append(offset)
         return self.is_complete()
 
 
@@ -204,7 +204,7 @@ class FlagWriterServer(DeviceServer):
 
         completed_flag_dump = self._flags.pop(flag_key)
         if not completed_flag_dump.is_complete():
-            logger.warning("Storing partially complete flag dump %s", flag_key)
+            logger.warning("Storing partially complete flag dump %s (Received Offsets: %s)", flag_key, completed_flag_dump._fragment_offsets)
             self._input_partial_dumps_sensor.value += 1
 
         try:
