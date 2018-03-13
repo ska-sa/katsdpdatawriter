@@ -199,9 +199,9 @@ class FlagWriterServer(DeviceServer):
 
         # use ChunkStore compatible chunking scheme, even though our trailing
         # axes will always be 0.
-        dump_key = "flags/{:05d}_00000_00000".format(int(dump_index))
-        flag_filename_temp = os.path.join(self._npy_path, "{}_{}.writing.npy".format(capture_block_id, self._flags_name), dump_key)
-        flag_filename = os.path.join(self._npy_path, "{}_{}.npy".format(capture_block_id, self._flags_name), dump_key)
+        dump_key = "{}_{}/flags/{:05d}_00000_00000".format(capture_block_id, self._flags_name, int(dump_index))
+        flag_filename_temp = os.path.join(self._npy_path, "{}.writing.npy".format(dump_key))
+        flag_filename = os.path.join(self._npy_path, "{}.npy".format(dump_key))
 
         completed_flag_dump = self._flags.pop(flag_key)
         if not completed_flag_dump.is_complete():
