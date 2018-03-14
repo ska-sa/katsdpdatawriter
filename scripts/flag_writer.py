@@ -27,12 +27,6 @@ import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdpflagwriter
 
-FLUSH_MARGIN = 5
-# Number of flag dumps to cache. Once full, FLUSH_MARGIN dumps
-# will be flushed out to disk oldest dump index first.
-# Flushing a margin prevents trashing around if the cache
-# gets full. Max expected flag heap size is around 250MB.
-FLAG_CACHE_SIZE = 15
 
 class Status(enum.Enum):
     IDLE = 1
@@ -114,7 +108,6 @@ class FlagWriterServer(DeviceServer):
         self._input_partial_dumps_sensor = Sensor(int, "input-partial-dumps-total",
                                                   "Number of partial dumps stored (due to age or early done).")
         self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
-        self._last_dump_duration_sensor = Sensor(float, "last-dump-duration", "Duration of the last flag dump to disk.", "s")
         self._output_seconds_total_sensor = Sensor(float, "output-seconds-total", "Accumulated time spent writing flag dumps.", "s")
         self._capture_block_state_sensor = Sensor(str, "capture-block-state",
                                                   "JSON dict with the state of each capture block seen in this session.",
@@ -133,16 +126,15 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._input_bytes_sensor)
         self.sensors.add(self._output_objects_sensor)
         self.sensors.add(self._last_dump_timestamp_sensor)
-        self.sensors.add(self._last_dump_duration_sensor)
         self.sensors.add(self._output_seconds_total_sensor)
         self.sensors.add(self._capture_block_state_sensor)
-        
+
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
                                               max_heaps=2 * self._n_streams,
-                                              ring_heaps=6 * self._n_streams,
+                                              ring_heaps=8 * self._n_streams,
                                               contiguous_only=False)
-
-        n_memory_buffers = 8 * self._n_streams
+        # max_heaps + ring_heaps + unreleased (2)
+        n_memory_buffers = 12 * self._n_streams
         try:
             self._n_chans = self._telstate['n_chans']
             self._n_bls = self._telstate['n_bls']
@@ -177,77 +169,33 @@ class FlagWriterServer(DeviceServer):
     def _get_capture_block_state(self, capture_block_id):
         return self._capture_block_state.get(capture_block_id, None)
 
-    def _add_flags(self, flags, capture_block_id, dump_index, channel0):
-        """Add the flag fragment into an appropriate data structure
-        and if a particular cbid / dump_index combination is complete,
-        write it to disk.
-
-        We test completion by checking that the len(self._endpoints)
-        fragments have arrived.
-
-        Returns
-        -------
-        bool
-            If True then this fragment completed a full dump and an attempt
-            was made to write this to disk. If the write failed we log
-            an error, but opt to bumble on.
-        """
-        flag_key = "{}_{}".format(capture_block_id, dump_index)
-        if flag_key not in self._flags:
-            self._flags[flag_key] = FlagItem((self._n_chans, self._n_bls), len(self._endpoints), dump_index)
-
-        # Add flag fragment to the FlagItem, and if complete write to disk
-        if self._flags[flag_key].add_fragment(flags, channel0):
-            self._store_flags(flag_key)
-        self._check_cache()
-
-    def _store_flags(self, flag_key):
-        (capture_block_id, dump_index) = flag_key.split("_")
-
-        # use ChunkStore compatible chunking scheme, even though our trailing
-        # axes will always be 0.
-        dump_key = "{}_{}/flags/{:05d}_00000_00000".format(capture_block_id, self._flags_name, int(dump_index))
+    def _store_flags(self, flags, capture_block_id, dump_index, channel0):
+        # use ChunkStore compatible chunking scheme
+        dump_key = "{}_{}/flags/{:05d}_{:05d}_00000".format(capture_block_id, self._flags_name, int(dump_index), int(channel0))
         flag_filename_temp = os.path.join(self._npy_path, "{}.writing.npy".format(dump_key))
         flag_filename = os.path.join(self._npy_path, "{}.npy".format(dump_key))
 
-        completed_flag_dump = self._flags.pop(flag_key)
-        if not completed_flag_dump.is_complete():
-            logger.warning("Storing partially complete flag dump %s (Received offsets: %s)", flag_key, completed_flag_dump._fragment_offsets)
-            self._input_partial_dumps_sensor.value += 1
-
         try:
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
+
             st = time.time()
-            np.save(flag_filename_temp, completed_flag_dump._flags)
+            f = open(flag_filename_temp, 'w')
+            np.save(f, flags)
+            # Ensure we commit to disk now to avoid lumpiness later
+            f.flush()
+            os.fsync(f)
+            f.close()
             os.rename(flag_filename_temp, flag_filename)
-            os.sync()
             et = time.time()
-            self._last_dump_duration_sensor.value = et - st
+
             self._output_seconds_total_sensor.value += et - st
             self._last_dump_timestamp_sensor.value = et
             logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
-                        (completed_flag_dump._flags.nbytes / 1e6) / (et - st))
+                        (flags.nbytes / 1e6) / (et - st))
             self._output_objects_sensor.value += 1
         except OSError:
             # If we fail to save, log the error, but discard dump and bumble on
             logger.error("Failed to flag dump to %s", flag_filename)
-
-    def _check_cache(self, store_all=False):
-        """Check the depth of the flag fragment cache and flush
-        and the oldest N dumps that make the cache larger than
-        FLAG_CACHE_SIZE.
-        """
-        to_flush = []
-        if store_all:
-            to_flush = [k for k in self._flags]
-            logger.info("Flushing all flag heaps (%d) to disk.", len(to_flush))
-        elif len(self._flags) >= FLAG_CACHE_SIZE:
-            ordered_keys = sorted([k for k in self._flags], key=lambda k: self._flags[k].dump_index, reverse=True)
-            to_flush = ordered_keys[FLAG_CACHE_SIZE - FLUSH_MARGIN:]
-            logger.warning("Flushing %d old flag heaps to disk to maintain cache depth.", len(to_flush))
-
-        for flag_key in to_flush:
-            self._store_flags(flag_key)
 
     def stop_spead(self):
         self._rx.stop()
@@ -293,7 +241,7 @@ class FlagWriterServer(DeviceServer):
                     if dump_index >= n_dumps:
                         n_dumps = dump_index + 1
                         self._input_dumps_sensor.value = n_dumps
-                    self._add_flags(flags, cbid, dump_index, channel0)
+                    self._store_flags(flags, cbid, dump_index, channel0)
                     self._input_heaps_sensor.value += 1
                     self._input_bytes_sensor.value += flags.nbytes
         except spead2.Stopped:
