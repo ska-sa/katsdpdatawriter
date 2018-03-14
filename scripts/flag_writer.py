@@ -137,7 +137,7 @@ class FlagWriterServer(DeviceServer):
         
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
                                               max_heaps=2 * self._n_streams,
-                                              ring_heaps=2 * self._n_streams,
+                                              ring_heaps=6 * self._n_streams,
                                               contiguous_only=False)
 
         n_memory_buffers = 8 * self._n_streams
