@@ -27,9 +27,12 @@ import katsdpservices
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdpflagwriter
 
-# Number of partial flag heaps to cache. Once full, heaps
-# will be discarded oldest arrival time first.
-FLAG_CACHE_SIZE = 10
+FLUSH_MARGIN = 5
+# Number of flag dumps to cache. Once full, FLUSH_MARGIN dumps
+# will be flushed out to disk oldest dump index first.
+# Flushing a margin prevents trashing around if the cache
+# gets full. Max expected flag heap size is around 250MB.
+FLAG_CACHE_SIZE = 15
 
 class Status(enum.Enum):
     IDLE = 1
@@ -52,13 +55,13 @@ class EnumEncoder(json.JSONEncoder):
 
 
 class FlagItem():
-    def __init__(self, shape_tuple, completed_fragment_count):
+    def __init__(self, shape_tuple, completed_fragment_count, dump_index):
         self._flags = np.empty(shape_tuple, dtype=np.int8)
         # Init with no data flag
         self._flags[:] = 0b00001000
         self._fragment_offsets = []
         self._completed_fragment_count = completed_fragment_count
-        self.started = time.time()
+        self.dump_index = dump_index
 
     def is_complete(self):
         return len(self._fragment_offsets) >= self._completed_fragment_count
@@ -225,9 +228,9 @@ class FlagWriterServer(DeviceServer):
         if store_all:
             to_flush = [k for k in self._flags]
             logger.info("Flushing all flag heaps (%d) to disk.", len(to_flush))
-        elif len(self._flags) > FLAG_CACHE_SIZE:
-            ordered_keys = sorted([k for k in self._flags], key=lambda k: self._flags[k].started, reverse=True)
-            to_flush = ordered_keys[FLAG_CACHE_SIZE:]
+        elif len(self._flags) >= FLAG_CACHE_SIZE:
+            ordered_keys = sorted([k for k in self._flags], key=lambda k: self._flags[k].dump_index, reverse=True)
+            to_flush = ordered_keys[FLAG_CACHE_SIZE - FLUSH_MARGIN:]
             logger.warning("Flushing %d old flag heaps to disk to maintain cache depth.", len(to_flush))
 
         for flag_key in to_flush:
