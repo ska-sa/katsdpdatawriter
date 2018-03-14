@@ -199,8 +199,9 @@ class FlagWriterServer(DeviceServer):
 
         # use ChunkStore compatible chunking scheme, even though our trailing
         # axes will always be 0.
-        dump_key = "flags/{:05d}_00000_00000.npy".format(int(dump_index))
-        flag_filename = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name), dump_key)
+        dump_key = "{}_{}/flags/{:05d}_00000_00000".format(capture_block_id, self._flags_name, int(dump_index))
+        flag_filename_temp = os.path.join(self._npy_path, "{}.writing.npy".format(dump_key))
+        flag_filename = os.path.join(self._npy_path, "{}.npy".format(dump_key))
 
         completed_flag_dump = self._flags.pop(flag_key)
         if not completed_flag_dump.is_complete():
@@ -209,7 +210,8 @@ class FlagWriterServer(DeviceServer):
 
         try:
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
-            np.save(flag_filename, completed_flag_dump._flags)
+            np.save(flag_filename_temp, completed_flag_dump._flags)
+            os.rename(flag_filename_temp, flag_filename)
             logger.info("Saved flag dump to disk in %s", flag_filename)
             self._output_objects_sensor.value += 1
         except OSError:
