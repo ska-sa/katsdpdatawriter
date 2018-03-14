@@ -216,6 +216,7 @@ class FlagWriterServer(DeviceServer):
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
             st = time.time()
             np.save(flag_filename, completed_flag_dump._flags)
+            os.sync()
             et = time.time()
             self._last_dump_duration_sensor.value = et - st
             self._last_dump_timestamp_sensor.value = et
