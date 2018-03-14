@@ -179,12 +179,13 @@ class FlagWriterServer(DeviceServer):
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
 
             st = time.time()
-            f = open(flag_filename_temp, 'w')
-            np.save(f, flags)
-            # Ensure we commit to disk now to avoid lumpiness later
-            f.flush()
-            os.fsync(f)
-            f.close()
+            with open(flag_filename_temp, 'wb') as f:
+                np.save(f, flags)
+                # Ensure we commit to disk now to avoid lumpiness later
+                f.flush()
+                os.fsync(f)
+                f.close()
+
             os.rename(flag_filename_temp, flag_filename)
             et = time.time()
 
@@ -278,10 +279,8 @@ class FlagWriterServer(DeviceServer):
         """
         if capture_block_id not in self._capture_block_state:
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
-        # Allow some time for stragglers to appear before committing all remaining
-        # flags to disk.
+        # Allow some time for stragglers to appear
         await asyncio.sleep(5, loop=self.loop)
-        self._check_cache(store_all=True)
         self._mark_cbid_complete(capture_block_id)
 
 
