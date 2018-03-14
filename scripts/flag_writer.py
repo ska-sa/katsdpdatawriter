@@ -192,7 +192,7 @@ class FlagWriterServer(DeviceServer):
         """
         flag_key = "{}_{}".format(capture_block_id, dump_index)
         if flag_key not in self._flags:
-            self._flags[flag_key] = FlagItem((self._n_chans, self._n_bls), len(self._endpoints))
+            self._flags[flag_key] = FlagItem((self._n_chans, self._n_bls), len(self._endpoints), dump_index)
 
         # Add flag fragment to the FlagItem, and if complete write to disk
         if self._flags[flag_key].add_fragment(flags, channel0):
