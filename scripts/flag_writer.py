@@ -223,10 +223,10 @@ class FlagWriterServer(DeviceServer):
             os.sync()
             et = time.time()
             self._last_dump_duration_sensor.value = et - st
-            self._output_seconds_total_sensor += et - st
+            self._output_seconds_total_sensor.value += et - st
             self._last_dump_timestamp_sensor.value = et
             logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
-                        (completed_flag_dump._flags.nbytes / 2.0**20) / (et - st))
+                        (completed_flag_dump._flags.nbytes / 1e6) / (et - st))
             self._output_objects_sensor.value += 1
         except OSError:
             # If we fail to save, log the error, but discard dump and bumble on
