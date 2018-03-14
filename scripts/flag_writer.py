@@ -114,6 +114,7 @@ class FlagWriterServer(DeviceServer):
         self._input_partial_dumps_sensor = Sensor(int, "input-partial-dumps-total",
                                                   "Number of partial dumps stored (due to age or early done).")
         self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
+        self._last_dump_duration_sensor = Sensor(float, "last-dump-duration", "Duration of the last flag dump to disk.", "s")
         self._capture_block_state_sensor = Sensor(str, "capture-block-state",
                                                   "JSON dict with the state of each capture block seen in this session.",
                                                   default='{}')
@@ -131,6 +132,7 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._input_bytes_sensor)
         self.sensors.add(self._output_objects_sensor)
         self.sensors.add(self._last_dump_timestamp_sensor)
+        self.sensors.add(self._last_dump_duration_sensor)
         self.sensors.add(self._capture_block_state_sensor)
         
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
@@ -212,8 +214,13 @@ class FlagWriterServer(DeviceServer):
 
         try:
             os.makedirs(os.path.dirname(flag_filename), exist_ok=True)
+            st = time.time()
             np.save(flag_filename, completed_flag_dump._flags)
-            logger.info("Saved flag dump to disk in %s", flag_filename)
+            et = time.time()
+            self._last_dump_duration_sensor.value = et - st
+            self._last_dump_timestamp_sensor.value = et
+            logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
+                        (et - st) / (completed_flag_dump._flags.nbytes / 2.0**20))
             self._output_objects_sensor.value += 1
         except OSError:
             # If we fail to save, log the error, but discard dump and bumble on
