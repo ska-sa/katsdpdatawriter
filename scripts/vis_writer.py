@@ -49,13 +49,10 @@ import Queue
 import signal
 import subprocess
 import time
-from itertools import product
 
 import numpy as np
 import manhole
-import dask
 import dask.array as da
-from dask.diagnostics import Profiler
 import spead2
 import spead2.recv
 import katsdptelstate
@@ -90,13 +87,6 @@ def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
     return tuple(chunks)
 
 
-def dsk_from_chunks(chunks, out_name):
-    """"Turn chunk spec into slices spec and keys suitable for dask Arrays."""
-    keys = product([out_name], *[range(len(bds)) for bds in chunks])
-    slices = da.core.slices_from_chunks(chunks)
-    return zip(keys, slices)
-
-
 class VisibilityWriterServer(DeviceServer):
     VERSION_INFO = ("sdp-vis-writer", 0, 1)
     BUILD_INFO = ('katsdpfilewriter',) + \
@@ -116,7 +106,6 @@ class VisibilityWriterServer(DeviceServer):
         # Never waited for, just a thread-safe flag.
         self._stopping = threading.Event()
         self._rx = None
-        self._graph_nbytes = 0
 
     def setup_sensors(self):
         self._status_sensor = Sensor.string(
@@ -182,10 +171,10 @@ class VisibilityWriterServer(DeviceServer):
 
     def _add_heap(self, capture_stream_name, chunk_info, heap_arrays,
                   dump_index, channel0):
-        """"Add a single heap to pending dask graph."""
+        """Write a single heap to chunk store."""
         start_time = time.time()
-        nbytes = 0
-        nchunks = 0
+        n_bytes = 0
+        n_chunks = 0
         tfb0 = (dump_index, channel0, 0)
         for array, arr in heap_arrays.iteritems():
             # Insert time axis (will be singleton dim as heap is part of 1 dump)
@@ -197,25 +186,22 @@ class VisibilityWriterServer(DeviceServer):
             end_chunk = start_channels.index(channel0 + n_chans_per_substream)
             chunks[1] = chunks[1][start_chunk:end_chunk]
             heap_offset = tfb0[:-1] if array == 'weights_channel' else tfb0
-
-            def offset_slices(s):
-                """"Adjust slices to start at the heap offset."""
-                return tuple(slice(s.start + i, s.stop + i)
-                             for (s, i) in zip(s, heap_offset))
-
             array_name = self._obj_store.join(capture_stream_name, array)
-            for k, s in dsk_from_chunks(chunks, array):
-                self._obj_store.put_chunk(array_name, offset_slices(s), arr[s])
-                nchunks += 1
-            nbytes += arr.nbytes
+            for s in da.core.slices_from_chunks(chunks):
+                # Adjust slices to start at the heap offset
+                offset = tuple(slice(s.start + i, s.stop + i)
+                               for (s, i) in zip(s, heap_offset))
+                self._obj_store.put_chunk(array_name, offset, arr[s])
+                n_chunks += 1
+            n_bytes += arr.nbytes
         end_time = time.time()
         elapsed = end_time - start_time
-        _inc_sensor(self._output_bytes_sensor, nbytes)
-        _inc_sensor(self._output_chunks_sensor, nchunks)
+        _inc_sensor(self._output_bytes_sensor, n_bytes)
+        _inc_sensor(self._output_chunks_sensor, n_chunks)
         _inc_sensor(self._output_seconds_sensor, elapsed)
-        self._logger.debug('Wrote %.3f MB in %.3f s => %.3f MB/s (dump %d, channels starting at %d)',
-                           nbytes / 1e6, elapsed, nbytes / elapsed / 1e6,
-                           dump_index, channel0)
+        self._logger.debug(
+            'Wrote %.3f MB in %.3f s => %.3f MB/s (dump %d, channels starting at %d)',
+            n_bytes / 1e6, elapsed, n_bytes / elapsed / 1e6, dump_index, channel0)
 
     def _write_final(self, capture_stream_name, heap_chunk_info, n_dumps):
         """Write final bits (mostly chunk info) after capture is done."""
@@ -261,7 +247,6 @@ class VisibilityWriterServer(DeviceServer):
         self._output_bytes_sensor.set_value(0)
         self._output_chunks_sensor.set_value(0)
         self._output_seconds_sensor.set_value(0)
-        self._graph_nbytes = 0
         # status to report once the capture stops
         end_status = "complete"
 
@@ -317,7 +302,6 @@ class VisibilityWriterServer(DeviceServer):
                     n_bytes += heap_nbytes
                     self._input_heaps_sensor.set_value(n_heaps)
                     self._input_bytes_sensor.set_value(n_bytes)
-                    self._graph_nbytes += heap_nbytes
         except Exception as err:
             self._logger.exception(err)
             end_status = "error"
