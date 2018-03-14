@@ -66,6 +66,11 @@ from katdal.chunkstore_npy import NpyFileChunkStore
 import katsdpfilewriter
 
 
+def _inc_sensor(sensor, delta, status=Sensor.NOMINAL, timestamp=None):
+    """Increment sensor value by `delta`."""
+    sensor.set_value(sensor.value() + delta, status, timestamp)
+
+
 def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
     """Generate dask chunk specification from ndarray parameters."""
     array_size = np.prod(shape) * np.dtype(dtype).itemsize
@@ -137,6 +142,18 @@ class VisibilityWriterServer(DeviceServer):
             "input-bytes-total",
             "Number of payload bytes received in this session.", "B", default=0)
         self.add_sensor(self._input_bytes_sensor)
+        self._output_bytes_sensor = Sensor.integer(
+            "output-bytes-total",
+            "Number of payload bytes written to storage in this session.", "B", default=0)
+        self.add_sensor(self._output_bytes_sensor)
+        self._output_chunks_sensor = Sensor.integer(
+            "output-chunks-total",
+            "Number of chunks written to storage in this session.", "B", default=0)
+        self.add_sensor(self._output_chunks_sensor)
+        self._output_seconds_sensor = Sensor.float(
+            "output-seconds-total",
+            "Time spent on writing chunks in this session.", "B", default=0)
+        self.add_sensor(self._output_seconds_sensor)
 
     def _dump_metadata(self, n_chans, n_chans_per_substream, n_bls):
         """Generate chunk metadata for all arrays in dump."""
@@ -168,6 +185,7 @@ class VisibilityWriterServer(DeviceServer):
         """"Add a single heap to pending dask graph."""
         start_time = time.time()
         nbytes = 0
+        nchunks = 0
         tfb0 = (dump_index, channel0, 0)
         for array, arr in heap_arrays.iteritems():
             # Insert time axis (will be singleton dim as heap is part of 1 dump)
@@ -188,12 +206,16 @@ class VisibilityWriterServer(DeviceServer):
             array_name = self._obj_store.join(capture_stream_name, array)
             for k, s in dsk_from_chunks(chunks, array):
                 self._obj_store.put_chunk(array_name, offset_slices(s), arr[s])
+                nchunks += 1
             nbytes += arr.nbytes
         end_time = time.time()
         elapsed = end_time - start_time
-        self._logger.info('Wrote %.3f MB in %.3f s => %.3f MB/s (dump %d, channels starting at %d)',
-                          nbytes / 1e6, elapsed, nbytes / elapsed / 1e6,
-                          dump_index, channel0)
+        _inc_sensor(self._output_bytes_sensor, nbytes)
+        _inc_sensor(self._output_chunks_sensor, nchunks)
+        _inc_sensor(self._output_seconds_sensor, elapsed)
+        self._logger.debug('Wrote %.3f MB in %.3f s => %.3f MB/s (dump %d, channels starting at %d)',
+                           nbytes / 1e6, elapsed, nbytes / elapsed / 1e6,
+                           dump_index, channel0)
 
     def _write_final(self, capture_stream_name, heap_chunk_info, n_dumps):
         """Write final bits (mostly chunk info) after capture is done."""
@@ -236,6 +258,9 @@ class VisibilityWriterServer(DeviceServer):
         self._input_heaps_sensor.set_value(n_heaps)
         self._input_bytes_sensor.set_value(n_bytes)
         self._input_incomplete_heaps_sensor.set_value(n_incomplete_heaps)
+        self._output_bytes_sensor.set_value(0)
+        self._output_chunks_sensor.set_value(0)
+        self._output_seconds_sensor.set_value(0)
         self._graph_nbytes = 0
         # status to report once the capture stops
         end_status = "complete"
