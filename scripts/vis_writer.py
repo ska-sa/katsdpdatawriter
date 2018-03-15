@@ -363,7 +363,7 @@ class VisibilityWriterServer(DeviceServer):
         if self._ibv:
             endpoint_tuples = [(endpoint.host, endpoint.port) for endpoint in self._endpoints]
             self._rx.add_udp_ibv_reader(endpoint_tuples, self._interface_address,
-                                        buffer_size=16 * 1024**2)
+                                        buffer_size=64 * 1024**2)
         else:
             for endpoint in self._endpoints:
                 if self._interface_address is not None:
