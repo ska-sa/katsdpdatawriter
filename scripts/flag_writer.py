@@ -48,22 +48,40 @@ class EnumEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-class FlagItem():
-    def __init__(self, shape_tuple, completed_fragment_count, dump_index):
-        self._flags = np.empty(shape_tuple, dtype=np.int8)
-        # Init with no data flag
-        self._flags[:] = 0b00001000
-        self._fragment_offsets = []
-        self._completed_fragment_count = completed_fragment_count
-        self.dump_index = dump_index
+class FlagStream():
+    """Small helper class to capture info around each captured
+    flag stream."""
+    def __init__(self, capture_block_id, n_chans, n_bls, dtype, n_substreams):
+        self._capture_block_id = capture_block_id
+        self._n_chans = n_chans
+        self._n_bls = n_bls
+        self._n_substreams = n_substreams
+        self._n_chans_per_substream = self._n_chans // self._n_substreams
+        self._dtype = dtype
+        self._dumps = {}
 
-    def is_complete(self):
-        return len(self._fragment_offsets) >= self._completed_fragment_count
+    def add_dump(self, dump_index, channel0):
+        """Track with portions of the substreams are actually written.
+        Not explicitly used, but will be in the future (and partially needed
+        now for chunnk_info."""
+        if dump_index not in self._dumps:
+            self._dumps[dump_index] = [0, 0, 0, 0]
+        self._dumps[dump_index][channel0 // self._n_chans_per_subtream] = 1
 
-    def add_fragment(self, flag_fragment, offset):
-        self._flags[offset:offset + flag_fragment.shape[0]] = flag_fragment
-        self._fragment_offsets.append(offset // flag_fragment.shape[0])
-        return self.is_complete()
+    def get_info(self):
+        """Return an info dict for use in ChunkStore."""
+        dump_count = len(self._dumps)
+        if dump_count == 0:
+            return None
+        chunk_info = {}
+        chunk_info['dtype'] = self._dtype
+        chunk_info['shape'] = tuple(dump_count, self._n_chans, self._n_bls)
+        # Chunks is a tuple of tuples with an entry for each
+        # chunk that *should* have been written to disk
+        chunk_info['chunks'] = tuple(dump_count * (1,),
+                                     self._n_substreams * (self._n_chans_per_substream),
+                                     tuple(self._n_bls))
+        return chunk_info
 
 
 def _warn_if_positive(value):
@@ -76,10 +94,11 @@ class FlagWriterServer(DeviceServer):
 
     def __init__(self, host, port, loop, endpoints, flag_interface, npy_path, telstate, flags_name):
         self._npy_path = npy_path
+        self._telstate_flags = telstate.view(flags_name)
         self._telstate = telstate
         self._endpoints = endpoints
         self._interface_address = katsdpservices.get_interface_address(flag_interface)
-        self._n_streams = len(endpoints)
+        self._n_substreams = len(endpoints)
         self._capture_block_state = {}
          # track the status of each capture block we have seen to date
         self._capture_block_stops = defaultdict(int)
@@ -87,10 +106,8 @@ class FlagWriterServer(DeviceServer):
          # if the number of stops is equal to the number of receiving endpoints
          # then we mark this is done, even if we have not had an explicit capture-done
         self._flags_name = flags_name
-        self._flags = {}
-        self._flag_fragments = defaultdict(int)
-         # index by capture_block_id and dump_index, stores the count of
-         # flag fragments for key.
+        self._flag_streams = {}
+         # track the dumps written out for each handled flag stream
 
         self._build_state_sensor = Sensor(str, "build-state", "SDP Flag Writer build state.")
         self._status_sensor = Sensor(Status, "status", "The current status of the flag writer process.")
@@ -130,16 +147,16 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._capture_block_state_sensor)
 
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
-                                              max_heaps=2 * self._n_streams,
-                                              ring_heaps=8 * self._n_streams,
+                                              max_heaps=2 * self._n_substreams,
+                                              ring_heaps=8 * self._n_substreams,
                                               contiguous_only=False)
         # max_heaps + ring_heaps + unreleased (2)
-        n_memory_buffers = 12 * self._n_streams
+        n_memory_buffers = 12 * self._n_substreams
         try:
-            self._n_chans = self._telstate['n_chans']
-            self._n_bls = self._telstate['n_bls']
-            self._int_time = self._telstate['int_time']
-            flag_heap_size = self._telstate['n_chans_per_substream'] * self._n_bls
+            self._n_chans = self._telstate_flags['n_chans']
+            self._n_bls = self._telstate_flags['n_bls']
+            self._int_time = self._telstate_flags['int_time']
+            flag_heap_size = self._telstate_flags['n_chans_per_substream'] * self._n_bls
         except KeyError:
             logger.error("Unable to find flag sizing params (n_bls, n_chans, int_time or n_chans_per_substream) for stream {} in telstate."
                          .format(self._flags_name))
@@ -194,6 +211,7 @@ class FlagWriterServer(DeviceServer):
             logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
                         (flags.nbytes / 1e6) / (et - st))
             self._output_objects_sensor.value += 1
+            self._flag_streams[capture_block_id].add_dump(dump_index, channel0)
         except OSError:
             # If we fail to save, log the error, but discard dump and bumble on
             logger.error("Failed to flag dump to %s", flag_filename)
@@ -231,6 +249,9 @@ class FlagWriterServer(DeviceServer):
                     dump_index = int(ig['dump_index'].value)
 
                     cbid = ig['capture_block_id'].value
+                    if cbid not in self._flag_streams:
+                        self._flag_streams[cbid] = FlagStream(cbid, self._n_chans, self._n_bls, flags.dtype, self._n_substreams)
+
                     cur_state = self._get_capture_block_state(cbid)
                     if cur_state == State.COMPLETE:
                         logger.error("Received flags for CBID %s after capture done. These flags will be *discarded*.", cbid)
@@ -262,17 +283,37 @@ class FlagWriterServer(DeviceServer):
             raise FailReply("Capture block ID {} is already active".format(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.CAPTURING)
 
+    def _get_cs_name(self, capture_block_id):
+        return "{}_{}".format(capture_block_id, self._flags_name)
+
     def _mark_cbid_complete(self, capture_block_id):
         """Inform other users of the on disk data that we are finished with a
         particular capture_block_id.
         """
         logger.info("Capture block %s flag capture complete.", capture_block_id)
-        touch_file = os.path.join(self._npy_path, "{}_{}".format(capture_block_id, self._flags_name),
-                                  "{}_complete".format(self._flags_name))
+        touch_file = os.path.join(self._npy_path, self._get_cs_name(capture_block_id),
+                                  "complete")
         os.makedirs(os.path.dirname(touch_file), exist_ok=True)
         with open(touch_file, 'a'):
             os.utime(touch_file, None)
         self._set_capture_block_state(capture_block_id, State.COMPLETE)
+
+    def _write_telstate_meta(self, capture_block_id):
+        """Write out chunk information for the specified CBID to telsate."""
+        if capture_block_id not in self._flag_streams:
+            logger.warning("No flag data received for cbid %d. Flag stream will not be usable.",
+                           capture_block_id)
+            return
+        chunk_info = self._flag_streams[capture_block_id].get_info()
+        if not chunk_info:
+            logger.warning("No flag data successfully stored for cbid %d. Flag stream will not be usable.",
+                           capture_block_id)
+            return
+        csn = self._get_cs_name(capture_block_id)
+        telstate_capture = self._telstate.view(csn)
+        telstate_capture.add('chunk_name', csn, immutable=True)
+        telstate_capture.add('chunk_info', {'flags': chunk_info})
+        logger.info("Written chunk information to telstate.")
 
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:
         """Mark specified capture_block_id as complete and flush flag cache.
@@ -281,6 +322,7 @@ class FlagWriterServer(DeviceServer):
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
         # Allow some time for stragglers to appear
         await asyncio.sleep(5, loop=self.loop)
+        self._write_telstate_meta(capture_block_id)
         self._mark_cbid_complete(capture_block_id)
 
 
@@ -330,10 +372,9 @@ if __name__ == '__main__':
 
     loop = asyncio.get_event_loop()
 
-    telstate_flags = args.telstate.view(args.flags_name)
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.npy_path,
-                              telstate_flags, args.flags_name)
+                              args.telstate, args.flags_name)
     logger.info("Started flag writer server.")
 
     loop.run_until_complete(run(loop, server))
