@@ -66,7 +66,7 @@ class FlagStream():
         now for chunnk_info."""
         if dump_index not in self._dumps:
             self._dumps[dump_index] = [0, 0, 0, 0]
-        self._dumps[dump_index][channel0 // self._n_chans_per_subtream] = 1
+        self._dumps[dump_index][channel0 // self._n_chans_per_substream] = 1
 
     def get_info(self):
         """Return an info dict for use in ChunkStore."""
