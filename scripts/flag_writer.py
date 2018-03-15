@@ -75,12 +75,12 @@ class FlagStream():
             return None
         chunk_info = {}
         chunk_info['dtype'] = self._dtype
-        chunk_info['shape'] = tuple(dump_count, self._n_chans, self._n_bls)
+        chunk_info['shape'] = (dump_count, self._n_chans, self._n_bls)
         # Chunks is a tuple of tuples with an entry for each
         # chunk that *should* have been written to disk
-        chunk_info['chunks'] = tuple(dump_count * (1,),
-                                     self._n_substreams * (self._n_chans_per_substream),
-                                     tuple(self._n_bls))
+        chunk_info['chunks'] = (dump_count * (1,),
+                                (self._n_substreams * (self._n_chans_per_substream,)),
+                                (self._n_bls))
         return chunk_info
 
 
