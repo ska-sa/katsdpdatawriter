@@ -77,7 +77,9 @@ class FlagWriterServer(DeviceServer):
     VERSION = "sdp-flag-writer-0.1"
     BUILD_STATE = "katsdpflagwriter-" + katsdpflagwriter.__version__
 
-    def __init__(self, host, port, loop, endpoints, flag_interface, npy_path, telstate, flags_name):
+    def __init__(self, host, port, loop,
+                 endpoints, flag_interface, flags_ibv,
+                 npy_path, telstate, flags_name):
         self._npy_path = npy_path
         self._telstate = telstate
         self._endpoints = endpoints
@@ -129,7 +131,7 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._output_objects_sensor)
         self.sensors.add(self._last_dump_timestamp_sensor)
         self.sensors.add(self._capture_block_state_sensor)
-        
+
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
                                               max_heaps=2 * self._n_streams,
                                               ring_heaps=2 * self._n_streams,
@@ -148,15 +150,21 @@ class FlagWriterServer(DeviceServer):
         memory_pool = spead2.MemoryPool(flag_heap_size, flag_heap_size + 4096,
                                         n_memory_buffers, n_memory_buffers)
         self._rx.set_memory_pool(memory_pool)
+        self._rx.set_memcpy(spead2.MEMCPY_NONTEMPORAL)
         self._rx.stop_on_stop_item = False
-        for endpoint in self._endpoints:
-            if self._interface_address is not None:
-                self._rx.add_udp_reader(endpoint.host, endpoint.port,
-                                        buffer_size=flag_heap_size + 4096,
-                                        interface_address=self._interface_address)
-            else:
-                self._rx.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
-                                        buffer_size=flag_heap_size + 4096)
+        if flags_ibv:
+            endpoint_tuples = [(endpoint.host, endpoint.port) for endpoint in self._endpoints]
+            self._rx.add_udp_ibv_reader(endpoint_tuples, self._interface_address,
+                                        buffer_size=16 * 1024**2)
+        else:
+            for endpoint in self._endpoints:
+                if self._interface_address is not None:
+                    self._rx.add_udp_reader(endpoint.host, endpoint.port,
+                                            buffer_size=flag_heap_size + 4096,
+                                            interface_address=self._interface_address)
+                else:
+                    self._rx.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
+                                            buffer_size=flag_heap_size + 4096)
 
     def _set_capture_block_state(self, capture_block_id, state):
         if state == State.COMPLETE:
@@ -356,12 +364,17 @@ if __name__ == '__main__':
                              '[default=auto]')
     parser.add_argument('--flags-name', type=str, default='sdp_l1_flags',
                         help='name for the flags stream. [default=%(default)s]', metavar='NAME')
+    parser.add_argument('--flags-ibv', action='store_true',
+                        help='Use ibverbs acceleration to receive flags')
     parser.add_argument('-p', '--port', type=int, default=2052, metavar='N',
                         help='KATCP host port [default=%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='KATCP host address [default=all hosts]')
 
     args = parser.parse_args()
+
+    if args.flags_ibv and flags.ibv_interface is None:
+        parser.error("--flags-ibv requires --flags-interface")
 
     if not os.path.isdir(args.npy_path):
         logger.error("Specified NPY path, %s, does not exist.", args.npy_path)
@@ -371,7 +384,7 @@ if __name__ == '__main__':
 
     telstate_flags = args.telstate.view(args.flags_name)
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
-                              args.flags_interface, args.npy_path,
+                              args.flags_interface, args.flags_ibv, args.npy_path,
                               telstate_flags, args.flags_name)
     logger.info("Started flag writer server.")
 

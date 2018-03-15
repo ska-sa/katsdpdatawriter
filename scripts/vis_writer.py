@@ -92,12 +92,13 @@ class VisibilityWriterServer(DeviceServer):
     BUILD_INFO = ('katsdpfilewriter',) + \
         tuple(katsdpfilewriter.__version__.split('.', 1)) + ('',)
 
-    def __init__(self, logger, l0_endpoints, l0_interface, l0_name, obj_store,
+    def __init__(self, logger, l0_endpoints, l0_interface, l0_ibv, l0_name, obj_store,
                  obj_size, telstate_l0, *args, **kwargs):
         super(VisibilityWriterServer, self).__init__(*args, logger=logger, **kwargs)
         self._endpoints = l0_endpoints
         self._interface_address = katsdpservices.get_interface_address(l0_interface)
         self._stream_name = l0_name
+        self._ibv = l0_ibv
         self._obj_store = obj_store
         self._obj_size = obj_size
         self._telstate_l0 = telstate_l0
@@ -357,15 +358,21 @@ class VisibilityWriterServer(DeviceServer):
         memory_pool = spead2.MemoryPool(l0_heap_size, l0_heap_size + 4096,
                                         n_memory_buffers, n_memory_buffers)
         self._rx.set_memory_pool(memory_pool)
+        self._rx.set_memcpy(spead2.MEMCPY_NONTEMPORAL)
         self._rx.stop_on_stop_item = False
-        for endpoint in self._endpoints:
-            if self._interface_address is not None:
-                self._rx.add_udp_reader(endpoint.host, endpoint.port,
-                                        buffer_size=l0_heap_size + 4096,
-                                        interface_address=self._interface_address)
-            else:
-                self._rx.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
-                                        buffer_size=l0_heap_size + 4096)
+        if self._ibv:
+            endpoint_tuples = [(endpoint.host, endpoint.port) for endpoint in self._endpoints]
+            self._rx.add_udp_ibv_reader(endpoint_tuples, self._interface_address,
+                                        buffer_size=16 * 1024**2)
+        else:
+            for endpoint in self._endpoints:
+                if self._interface_address is not None:
+                    self._rx.add_udp_reader(endpoint.host, endpoint.port,
+                                            buffer_size=l0_heap_size + 4096,
+                                            interface_address=self._interface_address)
+                else:
+                    self._rx.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
+                                            buffer_size=l0_heap_size + 4096)
 
         self._stopping.clear()
         sep = self._telstate_l0.SEPARATOR
@@ -423,6 +430,8 @@ if __name__ == '__main__':
                              '[default=auto]')
     parser.add_argument('--l0-name', default='sdp_l0', metavar='NAME',
                         help='Name of L0 stream from ingest [default=%(default)s]')
+    parser.add_argument('--l0-ibv', action='store_true',
+                        help='Use ibverbs acceleration to receive L0 stream [default=no]')
     parser.add_argument('--s3-endpoint-url',
                         help='URL of S3 gateway to Ceph cluster')
     parser.add_argument('--npy-path',
@@ -438,6 +447,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if not args.npy_path:
         parser.error('--npy-path is required')
+    if args.l0_ibv and args.l0_interface is None:
+        parser.error('--l0-ibv requires --l0-interface')
 
     # Connect to object store and save config in telstate
     obj_store = NpyFileChunkStore(args.npy_path)
@@ -445,7 +456,7 @@ if __name__ == '__main__':
     if args.s3_endpoint_url:
         telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)
     restart_queue = Queue.Queue()
-    server = VisibilityWriterServer(logger, args.l0_spead, args.l0_interface,
+    server = VisibilityWriterServer(logger, args.l0_spead, args.l0_interface, args.l0_ibv,
                                     args.l0_name, obj_store,
                                     args.obj_size_mb * 1e6, telstate_l0,
                                     host=args.host, port=args.port)
