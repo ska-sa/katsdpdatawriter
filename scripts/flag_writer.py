@@ -127,7 +127,6 @@ class FlagWriterServer(DeviceServer):
                                            "Number of heaps written to disk in this session.")
         self._input_partial_dumps_sensor = Sensor(int, "input-partial-dumps-total",
                                                   "Number of partial dumps stored (due to age or early done).")
-        self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
         self._output_seconds_total_sensor = Sensor(float, "output-seconds-total", "Accumulated time spent writing flag dumps.", "s")
         self._capture_block_state_sensor = Sensor(str, "capture-block-state",
                                                   "JSON dict with the state of each capture block seen in this session.",
@@ -145,7 +144,6 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._input_partial_dumps_sensor)
         self.sensors.add(self._input_bytes_sensor)
         self.sensors.add(self._output_heaps_sensor)
-        self.sensors.add(self._last_dump_timestamp_sensor)
         self.sensors.add(self._output_seconds_total_sensor)
         self.sensors.add(self._capture_block_state_sensor)
 
@@ -218,7 +216,6 @@ class FlagWriterServer(DeviceServer):
             et = time.time()
 
             self._output_seconds_total_sensor.value += et - st
-            self._last_dump_timestamp_sensor.value = et
             logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
                         (flags.nbytes / 1e6) / (et - st))
             self._output_heaps_sensor.value += 1
