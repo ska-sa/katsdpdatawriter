@@ -2,7 +2,7 @@
 
 """Capture L1 flags from the SPEAD stream(s) produced by cal.
 
-We adopt a naive strategy and store the flags for each dump in a single
+We adopt a naive strategy and store the flags for each heap in a single
 object. These objects will be later picked up by the trawler process
 and inserted into the appropriate bucket in S3 from where they will be
 picked up by katdal.
@@ -120,8 +120,8 @@ class FlagWriterServer(DeviceServer):
                                                status_func=_warn_if_positive)
         self._input_bytes_sensor = Sensor(int, "input-bytes-total",
                                           "Number of payload bytes received in this session.")
-        self._output_objects_sensor = Sensor(int, "output-objects-total",
-                                             "Number of objects written to disk in this session.")
+        self._output_heaps_sensor = Sensor(int, "output-heaps-total",
+                                             "Number of heaps written to disk in this session.")
         self._input_partial_dumps_sensor = Sensor(int, "input-partial-dumps-total",
                                                   "Number of partial dumps stored (due to age or early done).")
         self._last_dump_timestamp_sensor = Sensor(int, "last-dump-timestamp", "Timestamp of the last dump received.")
@@ -141,7 +141,7 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(self._input_incomplete_sensor)
         self.sensors.add(self._input_partial_dumps_sensor)
         self.sensors.add(self._input_bytes_sensor)
-        self.sensors.add(self._output_objects_sensor)
+        self.sensors.add(self._output_heaps_sensor)
         self.sensors.add(self._last_dump_timestamp_sensor)
         self.sensors.add(self._output_seconds_total_sensor)
         self.sensors.add(self._capture_block_state_sensor)
@@ -210,11 +210,11 @@ class FlagWriterServer(DeviceServer):
             self._last_dump_timestamp_sensor.value = et
             logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
                         (flags.nbytes / 1e6) / (et - st))
-            self._output_objects_sensor.value += 1
+            self._output_heaps_sensor.value += 1
             self._flag_streams[capture_block_id].add_dump(dump_index, channel0)
-        except OSError:
+        except OSError as e:
             # If we fail to save, log the error, but discard dump and bumble on
-            logger.error("Failed to flag dump to %s", flag_filename)
+            logger.error("Failed to store flag dump to %s (%s)", flag_filename, e)
 
     def stop_spead(self):
         self._rx.stop()
