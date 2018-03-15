@@ -379,7 +379,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.flags_ibv and flags.ibv_interface is None:
+    if args.flags_ibv and args.flags_interface is None:
         parser.error("--flags-ibv requires --flags-interface")
 
     if not os.path.isdir(args.npy_path):
