@@ -117,32 +117,39 @@ class VisibilityWriterServer(DeviceServer):
         self.add_sensor(self._device_status_sensor)
         self._input_dumps_sensor = Sensor.integer(
             "input-dumps-total",
-            "Number of (possibly partial) input dumps captured in this session.",
+            "Number of (possibly partial) input dumps captured in this session. "
+            "(prometheus: counter)",
             "", default=0)
         self.add_sensor(self._input_dumps_sensor)
         self._input_heaps_sensor = Sensor.integer(
             "input-heaps-total",
-            "Number of input heaps captured in this session.", "", default=0)
+            "Number of input heaps captured in this session. (prometheus: counter)",
+            "", default=0)
         self.add_sensor(self._input_heaps_sensor)
         self._input_incomplete_heaps_sensor = Sensor.integer(
             "input-incomplete-heaps-total",
-            "Number of incomplete heaps that were dropped.", "", default=0)
+            "Number of incomplete heaps that were dropped. (prometheus: counter)",
+            "", default=0)
         self.add_sensor(self._input_incomplete_heaps_sensor)
         self._input_bytes_sensor = Sensor.integer(
             "input-bytes-total",
-            "Number of payload bytes received in this session.", "B", default=0)
+            "Number of payload bytes received in this session. (prometheus: counter)",
+            "B", default=0)
         self.add_sensor(self._input_bytes_sensor)
         self._output_bytes_sensor = Sensor.integer(
             "output-bytes-total",
-            "Number of payload bytes written to storage in this session.", "B", default=0)
+            "Number of payload bytes written to storage in this session. (prometheus: counter)",
+            "B", default=0)
         self.add_sensor(self._output_bytes_sensor)
         self._output_chunks_sensor = Sensor.integer(
             "output-chunks-total",
-            "Number of chunks written to storage in this session.", "B", default=0)
+            "Number of chunks written to storage in this session. (prometheus: counter)",
+            "B", default=0)
         self.add_sensor(self._output_chunks_sensor)
         self._output_seconds_sensor = Sensor.float(
             "output-seconds-total",
-            "Time spent on writing chunks in this session.", "B", default=0)
+            "Time spent on writing chunks in this session. (prometheus: counter)",
+            "B", default=0)
         self.add_sensor(self._output_seconds_sensor)
 
     def _dump_metadata(self, n_chans, n_chans_per_substream, n_bls):

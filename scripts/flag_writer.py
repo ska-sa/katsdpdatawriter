@@ -112,25 +112,37 @@ class FlagWriterServer(DeviceServer):
         self._flag_streams = {}
          # track the dumps written out for each handled flag stream
 
-        self._build_state_sensor = Sensor(str, "build-state", "SDP Flag Writer build state.")
-        self._status_sensor = Sensor(Status, "status", "The current status of the flag writer process.")
-        self._input_heaps_sensor = Sensor(int, "input-heaps-total",
-                                          "Number of input heaps captured in this session.")
-        self._input_dumps_sensor = Sensor(int, "input-dumps-total",
-                                          "Number of complete input dumps captured in this session.")
-        self._input_incomplete_sensor = Sensor(int, "input-incomplete-heaps-total",
-                                               "Number of heaps dropped due to being incomplete.",
-                                               status_func=_warn_if_positive)
-        self._input_bytes_sensor = Sensor(int, "input-bytes-total",
-                                          "Number of payload bytes received in this session.")
-        self._output_heaps_sensor = Sensor(int, "output-heaps-total",
-                                           "Number of heaps written to disk in this session.")
-        self._input_partial_dumps_sensor = Sensor(int, "input-partial-dumps-total",
-                                                  "Number of partial dumps stored (due to age or early done).")
-        self._output_seconds_total_sensor = Sensor(float, "output-seconds-total", "Accumulated time spent writing flag dumps.", "s")
-        self._capture_block_state_sensor = Sensor(str, "capture-block-state",
-                                                  "JSON dict with the state of each capture block seen in this session.",
-                                                  default='{}')
+        self._build_state_sensor = Sensor(
+            str, "build-state", "SDP Flag Writer build state.")
+        self._status_sensor = Sensor(
+            Status, "status", "The current status of the flag writer process.")
+        self._input_heaps_sensor = Sensor(
+            int, "input-heaps-total",
+            "Number of input heaps captured in this session. (prometheus: counter)")
+        self._input_dumps_sensor = Sensor(
+            int, "input-dumps-total",
+            "Number of complete input dumps captured in this session. (prometheus: counter)")
+        self._input_incomplete_sensor = Sensor(
+            int, "input-incomplete-heaps-total",
+            "Number of heaps dropped due to being incomplete. (prometheus: counter)",
+            status_func=_warn_if_positive)
+        self._input_bytes_sensor = Sensor(
+            int, "input-bytes-total",
+            "Number of payload bytes received in this session. (prometheus: counter)")
+        self._output_heaps_sensor = Sensor(
+            int, "output-heaps-total",
+            "Number of heaps written to disk in this session. (prometheus: counter)")
+        self._input_partial_dumps_sensor = Sensor(
+            int, "input-partial-dumps-total",
+            "Number of partial dumps stored (due to age or early done). (prometheus: counter)")
+        self._output_seconds_total_sensor = Sensor(
+            float, "output-seconds-total",
+            "Accumulated time spent writing flag dumps. (prometheus: counter)",
+            "s")
+        self._capture_block_state_sensor = Sensor(
+            str, "capture-block-state",
+            "JSON dict with the state of each capture block seen in this session.",
+            default='{}')
 
         super().__init__(host, port, loop=loop)
 
