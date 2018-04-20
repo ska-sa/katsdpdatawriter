@@ -228,8 +228,6 @@ class FlagWriterServer(DeviceServer):
             et = time.time()
 
             self._output_seconds_total_sensor.value += et - st
-            logger.info("Saved flag dump to disk in %s at %.2f MBps", flag_filename,
-                        (flags.nbytes / 1e6) / (et - st))
             self._output_heaps_sensor.value += 1
             self._flag_streams[capture_block_id].add_dump(dump_index, channel0)
         except OSError as e:
