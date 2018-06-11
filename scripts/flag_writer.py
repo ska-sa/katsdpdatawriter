@@ -218,7 +218,8 @@ class FlagWriterServer(DeviceServer):
 
             st = time.time()
             with open(flag_filename_temp, 'wb') as f:
-                np.save(f, flags)
+                # Insert time axis (will be singleton dim as heap is part of 1 dump)
+                np.save(f, flags[np.newaxis])
                 # Ensure we commit to disk now to avoid lumpiness later
                 f.flush()
                 os.fsync(f)
