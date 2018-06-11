@@ -207,9 +207,14 @@ class FlagWriterServer(DeviceServer):
     def _get_capture_block_state(self, capture_block_id):
         return self._capture_block_state.get(capture_block_id, None)
 
+    def _get_capture_stream_name(self, capture_block_id):
+        return "{}_{}".format(capture_block_id, self._flags_name)
+
     def _store_flags(self, flags, capture_block_id, dump_index, channel0):
         # use ChunkStore compatible chunking scheme
-        dump_key = "{}_{}/flags/{:05d}_{:05d}_00000".format(capture_block_id, self._flags_name, int(dump_index), int(channel0))
+        capture_stream_name = self._get_capture_stream_name(capture_block_id)
+        dump_key = "{}/flags/{:05d}_{:05d}_00000".format(
+            capture_stream_name, int(dump_index), int(channel0))
         flag_filename_temp = os.path.join(self._npy_path, "{}.writing.npy".format(dump_key))
         flag_filename = os.path.join(self._npy_path, "{}.npy".format(dump_key))
 
@@ -301,9 +306,6 @@ class FlagWriterServer(DeviceServer):
         if capture_block_id in self._capture_block_state:
             raise FailReply("Capture block ID {} is already active".format(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.CAPTURING)
-
-    def _get_capture_stream_name(self, capture_block_id):
-        return "{}_{}".format(capture_block_id, self._flags_name)
 
     def _mark_cbid_complete(self, capture_block_id):
         """Inform other users of the on disk data that we are finished with a
