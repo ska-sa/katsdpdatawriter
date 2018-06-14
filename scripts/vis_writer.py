@@ -60,31 +60,13 @@ import katsdpservices
 from katcp import DeviceServer, Sensor
 from katcp.kattypes import request, return_reply, Str
 from katdal.chunkstore_npy import NpyFileChunkStore
+from katdal.chunkstore import generate_chunks
 import katsdpfilewriter
 
 
 def _inc_sensor(sensor, delta, status=Sensor.NOMINAL, timestamp=None):
     """Increment sensor value by `delta`."""
     sensor.set_value(sensor.value() + delta, status, timestamp)
-
-
-def generate_chunks(shape, dtype, target_obj_size, dims_to_split=(0, 1)):
-    """Generate dask chunk specification from ndarray parameters."""
-    array_size = np.prod(shape) * np.dtype(dtype).itemsize
-    num_chunks = np.ceil(array_size / target_obj_size)
-    chunks = [(s,) for s in shape]
-    for dim in dims_to_split:
-        if dim >= len(shape):
-            continue
-        if num_chunks > 0.5 * shape[dim]:
-            chunk_sizes = (1,) * shape[dim]
-        else:
-            items = np.arange(shape[dim])
-            chunk_indices = np.array_split(items, np.ceil(num_chunks))
-            chunk_sizes = tuple([len(chunk) for chunk in chunk_indices])
-        chunks[dim] = chunk_sizes
-        num_chunks /= len(chunk_sizes)
-    return tuple(chunks)
 
 
 class VisibilityWriterServer(DeviceServer):
@@ -164,7 +146,9 @@ class VisibilityWriterServer(DeviceServer):
             shape = [1, n_chans_per_substream, n_bls]
             if array == 'weights_channel':
                 shape = shape[:-1]
-            chunks = list(generate_chunks(shape, dtype, self._obj_size))
+            chunks = list(generate_chunks(shape, dtype, self._obj_size,
+                                          dims_to_split=(0, 1),
+                                          power_of_two=True))
             shape[1] = n_chans
             chunks[1] = n_substreams * chunks[1]
             chunk_info[array] = {'dtype': dtype, 'shape': tuple(shape),
