@@ -51,8 +51,8 @@ class EnumEncoder(json.JSONEncoder):
 class FlagStream():
     """Small helper class to capture info around each captured
     flag stream."""
-    def __init__(self, capture_block_id, n_chans, n_bls, dtype, n_substreams):
-        self._capture_block_id = capture_block_id
+    def __init__(self, chunk_store_prefix, n_chans, n_bls, dtype, n_substreams):
+        self._prefix = chunk_store_prefix
         self._n_chans = n_chans
         self._n_bls = n_bls
         self._n_substreams = n_substreams
@@ -76,6 +76,7 @@ class FlagStream():
         if dump_count == 0:
             return None
         chunk_info = {}
+        chunk_info['prefix'] = self._prefix
         chunk_info['dtype'] = self._dtype
         chunk_info['shape'] = (self._max_dump_index + 1, self._n_chans, self._n_bls)
         # Chunks is a tuple of tuples with an entry for each
@@ -274,7 +275,8 @@ class FlagWriterServer(DeviceServer):
 
                     cbid = ig['capture_block_id'].value
                     if cbid not in self._flag_streams:
-                        self._flag_streams[cbid] = FlagStream(cbid, self._n_chans, self._n_bls, flags.dtype, self._n_substreams)
+                        prefix = self._get_capture_stream_name(cbid)
+                        self._flag_streams[cbid] = FlagStream(prefix, self._n_chans, self._n_bls, flags.dtype, self._n_substreams)
 
                     cur_state = self._get_capture_block_state(cbid)
                     if cur_state == State.COMPLETE:
@@ -332,6 +334,7 @@ class FlagWriterServer(DeviceServer):
             return
         capture_stream_name = self._get_capture_stream_name(capture_block_id)
         telstate_capture = self._telstate.view(capture_stream_name)
+        # XXX Deprecated key, remove once ska-sa/katdal#164 is released
         telstate_capture.add('chunk_name', capture_stream_name, immutable=True)
         telstate_capture.add('chunk_info', {'flags': chunk_info})
         logger.info("Written chunk information to telstate.")

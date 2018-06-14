@@ -198,6 +198,7 @@ class VisibilityWriterServer(DeviceServer):
     def _write_final(self, capture_stream_name, heap_chunk_info, n_dumps):
         """Write final bits (mostly chunk info) after capture is done."""
         telstate_capture = self._telstate_l0.view(capture_stream_name)
+        # XXX Deprecated key, remove once ska-sa/katdal#164 is released
         telstate_capture.add('chunk_name', capture_stream_name, immutable=True)
         full_chunk_info = {}
         for array, info in heap_chunk_info.iteritems():
@@ -205,7 +206,8 @@ class VisibilityWriterServer(DeviceServer):
             shape[0] = n_dumps
             chunks = list(info['chunks'])
             chunks[0] = n_dumps * (1,)
-            full_chunk_info[array] = {'dtype': info['dtype'],
+            full_chunk_info[array] = {'prefix': capture_stream_name,
+                                      'dtype': info['dtype'],
                                       'shape': tuple(shape),
                                       'chunks': tuple(chunks)}
         telstate_capture.add('chunk_info', full_chunk_info, immutable=True)
