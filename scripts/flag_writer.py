@@ -48,9 +48,8 @@ class EnumEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-class FlagStream():
-    """Small helper class to capture info around each captured
-    flag stream."""
+class FlagStream(object):
+    """Small helper class to capture info around each captured flag stream."""
     def __init__(self, chunk_store_prefix, n_chans, n_bls, dtype, n_substreams):
         self._prefix = chunk_store_prefix
         self._n_chans = n_chans
@@ -167,8 +166,9 @@ class FlagWriterServer(DeviceServer):
             self._n_substreams = self._n_chans // self._telstate_flags['n_chans_per_substream']
             flag_heap_size = self._telstate_flags['n_chans_per_substream'] * self._n_bls
         except KeyError:
-            logger.error("Unable to find flag sizing params (n_bls, n_chans, int_time or n_chans_per_substream) for stream {} in telstate."
-                         .format(self._flags_name))
+            logger.error("Unable to find flag sizing params (n_bls, n_chans, int_time "
+                         "or n_chans_per_substream) for stream %s in telstate.",
+                         self._flags_name)
             raise
 
         self._rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
@@ -212,10 +212,10 @@ class FlagWriterServer(DeviceServer):
         return "{}_{}".format(capture_block_id, self._flags_name)
 
     def _store_flags(self, flags, capture_block_id, dump_index, channel0):
+        flag_stream = self._flag_streams[capture_block_id]
+        prefix = flag_stream.get_info()['prefix']
         # use ChunkStore compatible chunking scheme
-        capture_stream_name = self._get_capture_stream_name(capture_block_id)
-        dump_key = "{}/flags/{:05d}_{:05d}_00000".format(
-            capture_stream_name, int(dump_index), int(channel0))
+        dump_key = "{}/flags/{:05d}_{:05d}_00000".format(prefix, int(dump_index), int(channel0))
         flag_filename_temp = os.path.join(self._npy_path, "{}.writing.npy".format(dump_key))
         flag_filename = os.path.join(self._npy_path, "{}.npy".format(dump_key))
 
@@ -236,7 +236,7 @@ class FlagWriterServer(DeviceServer):
 
             self._output_seconds_total_sensor.value += et - st
             self._output_heaps_sensor.value += 1
-            self._flag_streams[capture_block_id].add_dump(dump_index, channel0)
+            flag_stream.add_dump(dump_index, channel0)
         except OSError as e:
             # If we fail to save, log the error, but discard dump and bumble on
             logger.error("Failed to store flag dump to %s (%s)", flag_filename, e)
@@ -276,7 +276,8 @@ class FlagWriterServer(DeviceServer):
                     cbid = ig['capture_block_id'].value
                     if cbid not in self._flag_streams:
                         prefix = self._get_capture_stream_name(cbid)
-                        self._flag_streams[cbid] = FlagStream(prefix, self._n_chans, self._n_bls, flags.dtype, self._n_substreams)
+                        self._flag_streams[cbid] = FlagStream(
+                            prefix, self._n_chans, self._n_bls, flags.dtype, self._n_substreams)
 
                     cur_state = self._get_capture_block_state(cbid)
                     if cur_state == State.COMPLETE:
