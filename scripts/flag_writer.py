@@ -51,7 +51,7 @@ class EnumEncoder(json.JSONEncoder):
 class FlagStream(object):
     """Small helper class to capture info around each captured flag stream."""
     def __init__(self, chunk_store_prefix, n_chans, n_bls, dtype, n_substreams):
-        self._prefix = chunk_store_prefix
+        self.prefix = chunk_store_prefix
         self._n_chans = n_chans
         self._n_bls = n_bls
         self._n_substreams = n_substreams
@@ -61,7 +61,7 @@ class FlagStream(object):
         self._max_dump_index = 0
 
     def add_dump(self, dump_index, channel0):
-        """Track with portions of the substreams are actually written.
+        """Track which portions of the substreams were actually written to store.
         Not explicitly used, but will be in the future (and partially needed
         now for chunk_info)."""
         if dump_index not in self._dumps:
@@ -70,12 +70,11 @@ class FlagStream(object):
         self._max_dump_index = max(self._max_dump_index, dump_index)
 
     def get_info(self):
-        """Return an info dict for use in ChunkStore."""
-        dump_count = len(self._dumps)
-        if dump_count == 0:
-            return None
+        """Return an info dict for use in ChunkStore (empty if no data was stored)."""
+        if not self._dumps:
+            return {}
         chunk_info = {}
-        chunk_info['prefix'] = self._prefix
+        chunk_info['prefix'] = self.prefix
         chunk_info['dtype'] = self._dtype
         chunk_info['shape'] = (self._max_dump_index + 1, self._n_chans, self._n_bls)
         # Chunks is a tuple of tuples with an entry for each
@@ -213,9 +212,9 @@ class FlagWriterServer(DeviceServer):
 
     def _store_flags(self, flags, capture_block_id, dump_index, channel0):
         flag_stream = self._flag_streams[capture_block_id]
-        prefix = flag_stream.get_info()['prefix']
         # use ChunkStore compatible chunking scheme
-        dump_key = "{}/flags/{:05d}_{:05d}_00000".format(prefix, int(dump_index), int(channel0))
+        dump_key = "{}/flags/{:05d}_{:05d}_00000".format(
+            flag_stream.prefix, int(dump_index), int(channel0))
         flag_filename_temp = os.path.join(self._npy_path, "{}.writing.npy".format(dump_key))
         flag_filename = os.path.join(self._npy_path, "{}.npy".format(dump_key))
 
