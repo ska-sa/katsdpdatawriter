@@ -38,7 +38,7 @@ class Array:
 
     @property
     def substreams(self):
-        return int(np.product(len(c) for c in self.in_chunks))
+        return int(np.product([len(c) for c in self.in_chunks]))
 
     @property
     def shape(self):
