@@ -23,13 +23,30 @@ def _warn_if_positive(value: float) -> Sensor.Status:
     return Sensor.Status.WARN if value > 0 else Sensor.Status.NOMINAL
 
 
+# Just to work around https://github.com/python/mypy/issues/4729
+def _dtype_converter(dtype: Any) -> np.dtype:
+    return np.dtype(dtype)
+
+
 @attr.s(frozen=True)
 class Array:
     name = attr.ib()         # Excludes the prefix
     in_chunks = attr.ib()
     out_chunks = attr.ib()
     fill_value = attr.ib()
-    dtype = attr.ib()
+    dtype = attr.ib(converter=_dtype_converter)
+
+    @property
+    def substreams(self):
+        return int(np.product(len(c) for c in self.in_chunks))
+
+    @property
+    def shape(self):
+        return tuple(sum(c) for c in self.in_chunks)
+
+    @property
+    def nbytes(self):
+        return int(np.product(self.shape)) * self.dtype.itemsize
 
 
 class ChunkStoreRechunker(rechunk.Rechunker):
@@ -192,9 +209,7 @@ def chunks_from_telstate(self, telstate):
 
 def make_receiver(endpoints, arrays, interface_address, ibv,
                   max_heaps_per_substream=2, ring_heaps_per_substream=8):
-    n_substreams = int(np.product(len(c) for c in arrays[0].in_chunks))
-    array_sizes = [int(np.product(max(c) for c in a.in_chunks)) * np.dtype(a.dtype).item_size
-                   for a in arrays]
+    n_substreams = arrays[0].substreams
 
     max_heaps = max_heaps_per_substream * n_substreams
     ring_heaps = ring_heaps_per_substream * n_substreams
@@ -203,7 +218,7 @@ def make_receiver(endpoints, arrays, interface_address, ibv,
                                     ring_heaps=ring_heaps,
                                     contiguous_only=False)
     n_memory_buffers = max_heaps + ring_heaps + 2
-    heap_size = sum(array_sizes)
+    heap_size = sum(a.nbytes for a in arrays)
     memory_pool = spead2.MemoryPool(heap_size, heap_size + 4096,
                                     n_memory_buffers, n_memory_buffers)
     rx.set_memory_pool(memory_pool)
