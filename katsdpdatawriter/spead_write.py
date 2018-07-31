@@ -67,9 +67,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
         self.chunk_store.put_chunk(self.name, slices, value)
         end = time.monotonic()
-        self.sensors['output-chunks-total'] += 1
-        self.sensors['output-bytes-total'] += value.nbytes
-        self.sensors['output-seconds-total'] += end - start
+        self.sensors['output-chunks-total'].value += 1
+        self.sensors['output-bytes-total'].value += value.nbytes
+        self.sensors['output-seconds-total'].value += end - start
 
 
 class RechunkerGroup:
@@ -87,8 +87,8 @@ class RechunkerGroup:
 
     def add(self, offset_prefix: Offset, values: Iterable[np.ndarray]) -> None:
         dump_index = offset_prefix[0]
-        if dump_index >= self.sensors['input-dumps-total']:
-            self.sensors['input-dumps-total'] = dump_index + 1
+        if dump_index >= self.sensors['input-dumps-total'].value:
+            self.sensors['input-dumps-total'].value = dump_index + 1
         for rechunker, value in zip(self._rechunkers, values):
             offset = offset_prefix + (0,) * (value.ndim - len(offset_prefix))
             rechunker.add(offset, value)
@@ -106,7 +106,7 @@ class SpeadWriter:
     def __init__(self, rx: spead2.recv.asyncio.Stream) -> None:
         self.rx = rx
 
-        self.sensors = SensorSet()
+        self.sensors = SensorSet(set())
         self.sensors.add(Sensor(
             int, "input-incomplete-heaps-total",
             "Number of heaps dropped due to being incomplete. (prometheus: counter)",
@@ -135,9 +135,9 @@ class SpeadWriter:
             "s"))
 
     def clear_input_sensors(self) -> None:
-        self.sensors['input-bytes-total'] = 0
-        self.sensors['input-heaps-total'] = 0
-        self.sensors['input-dumps-total'] = 0
+        self.sensors['input-bytes-total'].value = 0
+        self.sensors['input-heaps-total'].value = 0
+        self.sensors['input-dumps-total'].value = 0
 
     async def run(self, stops: int = None) -> None:
         first = True
@@ -156,7 +156,7 @@ class SpeadWriter:
                 else:
                     updated = {}
             elif isinstance(heap, spead2.recv.IncompleteHeap):
-                self.sensors['input-incomplete-heaps-total'] += 1
+                self.sensors['input-incomplete-heaps-total'].value += 1
             else:
                 try:
                     updated = ig.update(heap)
@@ -172,8 +172,8 @@ class SpeadWriter:
                     values = [ig[array.name].value for array in group.arrays]
                     nbytes = sum(value.nbytes for value in values)
                     group.add((dump_index, channel0), values)
-                    self.sensors['input-heaps-total'] += 1
-                    self.sensors['input-bytes-total'] += nbytes
+                    self.sensors['input-heaps-total'].value += 1
+                    self.sensors['input-bytes-total'].value += nbytes
 
     def stop(self) -> None:
         self.rx.stop()
