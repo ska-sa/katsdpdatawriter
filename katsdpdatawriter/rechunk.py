@@ -1,5 +1,6 @@
 import logging
 import itertools
+from typing import Tuple, Dict, Any, Optional
 
 import numpy as np
 
@@ -7,7 +8,14 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def _offset_to_size_1d(chunks):
+Offset = Tuple[int, ...]
+Shape = Tuple[int, ...]
+Chunks1D = Tuple[int, ...]
+Chunks = Tuple[Chunks1D, ...]
+Slices = Tuple[slice, ...]
+
+
+def _offset_to_size_1d(chunks: Chunks1D) -> Dict[int, int]:
     """Maps offset of start of each chunk to the size of that chunk
 
     Parameters
@@ -29,11 +37,11 @@ def _offset_to_size_1d(chunks):
     return out
 
 
-def _offset_to_size(chunks):
+def _offset_to_size(chunks: Chunks) -> Tuple[Dict[int, int], ...]:
     return tuple(_offset_to_size_1d(c) for c in chunks)
 
 
-def _split_chunks_1d(in_chunks, out_chunks):
+def _split_chunks_1d(in_chunks: Chunks1D, out_chunks: Chunks1D) -> Dict[int, Slices]:
     """
     Divide output chunks into groups that align to the input chunks.
 
@@ -76,7 +84,7 @@ def _split_chunks_1d(in_chunks, out_chunks):
     return out
 
 
-def _split_chunks(in_chunks, out_chunks):
+def _split_chunks(in_chunks: Chunks, out_chunks: Chunks) -> Tuple[Dict[int, Slices], ...]:
     if len(in_chunks) != len(out_chunks):
         raise ValueError('in_chunks and out_chunks have different length')
     return tuple(_split_chunks_1d(*item) for item in zip(in_chunks, out_chunks))
@@ -130,18 +138,21 @@ class Rechunker:
         An intermediate chunk has the output chunk size in the time axis and
         the input chunk size in other axes.
         """
-        def __init__(self, offset, initial_value):
+        def __init__(self, offset: Offset, initial_value: np.ndarray) -> None:
             self.offset = offset
             self.value = initial_value
 
-        def add(self, offset, value):
+        def add(self, offset: Offset, value: np.ndarray) -> None:
             assert offset[1:] == self.offset[1:]
             if value.shape[1:] != self.value.shape[1:] or value.shape[0] != 1:
                 raise ValueError('value has wrong shape')
             rel = offset[0] - self.offset[0]
             self.value[rel:rel+1] = value
 
-    def __init__(self, name, in_chunks, out_chunks, fill_value, dtype):
+    def __init__(self, name: str,
+                 in_chunks: Chunks,
+                 out_chunks: Chunks,
+                 fill_value: Any, dtype: Any) -> None:
         if in_chunks[0] != (1,):
             raise ValueError('in_chunks does not start with (1,)')
         if len(out_chunks[0]) != 1:
@@ -152,13 +163,13 @@ class Rechunker:
         self.out_chunks = out_chunks
         self.fill_value = fill_value
         self.dtype = np.dtype(dtype)
-        self._items = {}   # Indexed by offset[1:]
+        self._items = {}   # type: Dict[Tuple[int, ...], Rechunker._Item]  # Indexed by offset[1:]
         self._sizes = _offset_to_size(in_chunks[1:])
         self._split_chunks = _split_chunks(in_chunks[1:], out_chunks[1:])
         self._time_accum = out_chunks[0][0]
         self._n_dumps = 0
 
-    def out_of_order(self, received, seen):
+    def out_of_order(self, received: int, seen: int) -> None:
         """Report a chunk received from the past.
 
         This can be overridden to change the reporting channel.
@@ -167,18 +178,18 @@ class Rechunker:
             "Received old chunk for array %s (%d < %d)",
             self.name, received, seen)         # pragma: nocover
 
-    def _item_shape(self, offset):
+    def _item_shape(self, offset: Offset) -> Shape:
         sizes = tuple(s[ofs] for ofs, s in zip(offset[1:], self._sizes))
         return (self._time_accum,) + sizes
 
-    def _flush(self, item):
+    def _flush(self, item: _Item) -> None:
         slices = tuple(s[ofs] for ofs, s in zip(item.offset[1:], self._split_chunks))
         for idx in itertools.product(*slices):
-            full_idx = np.index_exp[0:] + idx
+            full_idx = np.index_exp[0:len(item.value)] + idx
             offset = tuple(s.start + offset for s, offset in zip(full_idx, item.offset))
             self.output(offset, item.value[full_idx])
 
-    def _get_item(self, offset):
+    def _get_item(self, offset: Offset) -> Optional[_Item]:
         key = offset[1:]
         # Round down to the start of the accumulation
         item_offset = (offset[0] // self._time_accum * self._time_accum,) + key
@@ -196,7 +207,7 @@ class Rechunker:
             item = None
         return item
 
-    def add(self, offset, value):
+    def add(self, offset: Offset, value: np.ndarray) -> None:
         """Add a new incoming chunk.
 
         Parameters
@@ -231,7 +242,7 @@ class Rechunker:
             self._flush(item)
         self._n_dumps = max(self._n_dumps, offset[0] + 1)
 
-    def close(self):
+    def close(self) -> None:
         for item in self._items.values():
             # Truncate to last seen dump
             times = self._n_dumps - item.offset[0]
@@ -240,10 +251,10 @@ class Rechunker:
             self._flush(item)
         self._items.clear()
 
-    def _get_shape(self):
+    def _get_shape(self) -> Shape:
         return (self._n_dumps,) + tuple(sum(c) for c in self.out_chunks[1:])
 
-    def _get_chunks(self):
+    def _get_chunks(self) -> Chunks:
         c = self.out_chunks[0][0]
         full = self._n_dumps // c
         last = self._n_dumps % c
@@ -253,7 +264,7 @@ class Rechunker:
             time_chunks = (c,) * full
         return (time_chunks,) + self.out_chunks[1:]
 
-    def get_chunk_info(self, prefix):
+    def get_chunk_info(self, prefix: str) -> Dict[str, Any]:
         return {
             'prefix': prefix,
             'dtype': self.dtype,
@@ -261,5 +272,5 @@ class Rechunker:
             'chunks': self._get_chunks()
         }
 
-    def output(self, offset, value):
+    def output(self, offset: Offset, value: np.ndarray) -> None:
         raise NotImplementedError      # pragma: nocover
