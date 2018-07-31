@@ -1,11 +1,11 @@
 from unittest import mock
-from typing import List, Tuple
+from typing import List, Tuple   # noqa: F401
 
 import numpy as np
 from nose.tools import assert_equal, assert_raises
 
 from .. import rechunk
-from ..rechunk import Chunks, Offset
+from ..rechunk import Chunks, Offset   # noqa: F401
 
 
 def test_offset_to_size_1d() -> None:
