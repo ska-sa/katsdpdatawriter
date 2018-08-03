@@ -6,6 +6,7 @@ from aiokatcp import Sensor, SensorSet
 import spead2
 import spead2.send
 import spead2.recv.asyncio
+from katdal.chunkstore import ChunkStore
 
 from ..spead_write import Array, RechunkerGroup, SpeadWriter
 from ..rechunk import Offset
@@ -41,8 +42,7 @@ def _join(*args: str) -> str:
 
 class TestRechunkerGroup:
     def setup(self) -> None:
-        # TODO: use ChunkStore as spec when it supports py3
-        self.chunk_store = mock.MagicMock()
+        self.chunk_store = mock.create_autospec(spec=ChunkStore, spec_set=True, instance=True)
         self.chunk_store.join = _join
 
         self.sensors = SensorSet(set())
