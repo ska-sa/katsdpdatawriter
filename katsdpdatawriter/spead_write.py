@@ -193,7 +193,7 @@ class SpeadWriter:
         raise NotImplementedError
 
 
-def chunks_from_telstate(self, telstate):
+def chunks_from_telstate(telstate):
     try:
         n_chans = telstate['n_chans']
         n_bls = telstate['n_bls']
