@@ -57,6 +57,7 @@ def add_sensors(sensors: SensorSet) -> None:
         "Accumulated time spent writing flag dumps. (prometheus: counter)",
         "s"))
 
+
 def clear_input_sensors(sensors: SensorSet) -> None:
     """Zero the input counters in a sensor set"""
     sensors['input-bytes-total'].value = 0

@@ -2,7 +2,7 @@ from unittest import mock
 
 import numpy as np
 from nose.tools import assert_equal, assert_is_instance
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import SensorSet
 import spead2
 import spead2.send
 import spead2.recv.asyncio
