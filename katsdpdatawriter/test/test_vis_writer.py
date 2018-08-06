@@ -84,7 +84,7 @@ class TestVisWriterServer(BaseTestWriterServer):
         await self.tx[0].async_send_heap(self.ig.get_heap())
         await asyncio.sleep(0.5)
         self.assert_sensor_equals('status', Status.CAPTURING)
-        # self.assert_sensor_equals('input-heaps-total', 1)
+        self.assert_sensor_equals('input-heaps-total', 1)
         for tx in self.tx:
             await tx.async_send_heap(self.ig.get_end())
         await asyncio.sleep(0.5)

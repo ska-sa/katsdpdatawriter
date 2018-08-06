@@ -140,6 +140,7 @@ class VisibilityWriterServer(DeviceServer):
             DeviceStatus, 'device-status', 'Health sensor',
             default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL,
             status_func=_device_status_status))
+        spead_write.add_sensors(self.sensors)
 
     def _first_heap(self):
         self.sensors['status'].value = Status.CAPTURING
@@ -147,9 +148,9 @@ class VisibilityWriterServer(DeviceServer):
     async def _do_capture(self, capture_stream_name: str, rx: spead2.recv.asyncio.Stream) -> None:
         writer = None
         try:
-            writer = spead_write.SpeadWriter(rx)
             rechunker_group = spead_write.RechunkerGroup(
-                self._chunk_store, writer.sensors, capture_stream_name, self._arrays)
+                self._chunk_store, self.sensors, capture_stream_name, self._arrays)
+            writer = spead_write.SpeadWriter(self.sensors, rx)
             # mypy doesn't like overriding methods on an instance
             writer.rechunker_group = lambda updated: rechunker_group   # type: ignore
             writer.first_heap = self._first_heap                       # type: ignore
@@ -172,9 +173,7 @@ class VisibilityWriterServer(DeviceServer):
             self.sensors['status'].value = Status.ERROR
             self.sensors['device-status'].value = DeviceStatus.FAIL
         finally:
-            # TODO: sensors belong in the device server class
-            if writer is not None:
-                writer.clear_input_sensors()
+            spead_write.clear_input_sensors(self.sensors)
 
     async def request_capture_init(self, ctx, capture_block_id: str = None) -> None:
         """Start listening for L0 data"""

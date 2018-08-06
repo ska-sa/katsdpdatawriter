@@ -69,6 +69,7 @@ class FlagWriterServer(DeviceServer):
             str, "capture-block-state",
             "JSON dict with the state of each capture block seen in this session.",
             default='{}', initial_status=Sensor.Status.NOMINAL))
+        spead_write.add_sensors(self.sensors)
 
         in_chunks = spead_write.chunks_from_telstate(self._telstate_flags)
         out_chunks = in_chunks   # For now - will change later
@@ -79,7 +80,7 @@ class FlagWriterServer(DeviceServer):
         rx = spead_write.make_receiver(
             self._endpoints, self._arrays,
             katsdpservices.get_interface_address(flag_interface), flags_ibv)
-        self._writer = spead_write.SpeadWriter(rx)
+        self._writer = spead_write.SpeadWriter(self.sensors, rx)
         # mypy doesn't like replacing methods on an instance
         self._writer.first_heap = self._first_heap    # type: ignore
         self._writer.rechunker_group = self._rechunker_group    # type: ignore
@@ -124,7 +125,7 @@ class FlagWriterServer(DeviceServer):
         except Exception:
             logger.exception("Error in SPEAD receiver")
         finally:
-            self._writer.clear_input_sensors()
+            spead_write.clear_input_sensors(self.sensors)
             self.sensors['status'].value = Status.FINISHED
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:

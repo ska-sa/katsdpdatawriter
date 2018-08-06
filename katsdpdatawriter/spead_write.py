@@ -28,6 +28,42 @@ def _dtype_converter(dtype: Any) -> np.dtype:
     return np.dtype(dtype)
 
 
+def add_sensors(sensors: SensorSet) -> None:
+    """Add input and output counters to a server's sensors."""
+    sensors.add(Sensor(
+        int, "input-incomplete-heaps-total",
+        "Number of heaps dropped due to being incomplete. (prometheus: counter)",
+        status_func=_warn_if_positive))
+    sensors.add(Sensor(
+        int, "input-bytes-total",
+        "Number of payload bytes received in this session. (prometheus: counter)",
+        "B"))
+    sensors.add(Sensor(
+        int, "input-heaps-total",
+        "Number of input heaps captured in this session. (prometheus: counter)"))
+    sensors.add(Sensor(
+        int, "input-dumps-total",
+        "Number of complete input dumps captured in this session. (prometheus: counter)"))
+
+    sensors.add(Sensor(
+        int, "output-bytes-total",
+        "Number of payload bytes written to chunk store in this session. (prometheus: counter)",
+        "B"))
+    sensors.add(Sensor(
+        int, "output-chunks-total",
+        "Number of chunks written to chunk store in this session. (prometheus: counter)"))
+    sensors.add(Sensor(
+        float, "output-seconds-total",
+        "Accumulated time spent writing flag dumps. (prometheus: counter)",
+        "s"))
+
+def clear_input_sensors(sensors: SensorSet) -> None:
+    """Zero the input counters in a sensor set"""
+    sensors['input-bytes-total'].value = 0
+    sensors['input-heaps-total'].value = 0
+    sensors['input-dumps-total'].value = 0
+
+
 @attr.s(frozen=True)
 class Array:
     name = attr.ib()         # Excludes the prefix
@@ -103,41 +139,9 @@ class RechunkerGroup:
 
 
 class SpeadWriter:
-    def __init__(self, rx: spead2.recv.asyncio.Stream) -> None:
+    def __init__(self, sensors: SensorSet, rx: spead2.recv.asyncio.Stream) -> None:
+        self.sensors = sensors
         self.rx = rx
-
-        self.sensors = SensorSet(set())
-        self.sensors.add(Sensor(
-            int, "input-incomplete-heaps-total",
-            "Number of heaps dropped due to being incomplete. (prometheus: counter)",
-            status_func=_warn_if_positive))
-        self.sensors.add(Sensor(
-            int, "input-bytes-total",
-            "Number of payload bytes received in this session. (prometheus: counter)",
-            "B"))
-        self.sensors.add(Sensor(
-            int, "input-heaps-total",
-            "Number of input heaps captured in this session. (prometheus: counter)"))
-        self.sensors.add(Sensor(
-            int, "input-dumps-total",
-            "Number of complete input dumps captured in this session. (prometheus: counter)"))
-
-        self.sensors.add(Sensor(
-            int, "output-bytes-total",
-            "Number of payload bytes written to chunk store in this session. (prometheus: counter)",
-            "B"))
-        self.sensors.add(Sensor(
-            int, "output-chunks-total",
-            "Number of chunks written to chunk store in this session. (prometheus: counter)"))
-        self.sensors.add(Sensor(
-            float, "output-seconds-total",
-            "Accumulated time spent writing flag dumps. (prometheus: counter)",
-            "s"))
-
-    def clear_input_sensors(self) -> None:
-        self.sensors['input-bytes-total'].value = 0
-        self.sensors['input-heaps-total'].value = 0
-        self.sensors['input-dumps-total'].value = 0
 
     async def run(self, stops: int = None) -> None:
         first = True
