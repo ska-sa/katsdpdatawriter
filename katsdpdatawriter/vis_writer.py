@@ -124,7 +124,7 @@ class VisibilityWriterServer(DeviceServer):
         in_chunks = spead_write.chunks_from_telstate(telstate_l0)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
         self._arrays = [
-            _make_array('vis', in_chunks, 0, np.complex64, chunk_size),
+            _make_array('correlator_data', in_chunks, 0, np.complex64, chunk_size),
             _make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size),
             _make_array('weights', in_chunks, 0, np.uint8, chunk_size),
             _make_array('weights_channel', in_chunks[:2], 0, np.float32, chunk_size)
@@ -137,7 +137,7 @@ class VisibilityWriterServer(DeviceServer):
             default=Status.IDLE, initial_status=Sensor.Status.NOMINAL,
             status_func=_status_status))
         self.sensors.add(Sensor(
-            DeviceStatus, 'Health sensor',
+            DeviceStatus, 'device-status', 'Health sensor',
             default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL,
             status_func=_device_status_status))
 
@@ -147,9 +147,9 @@ class VisibilityWriterServer(DeviceServer):
     async def _do_capture(self, capture_stream_name: str, rx: spead2.recv.asyncio.Stream) -> None:
         writer = None
         try:
-            rechunker_group = spead_write.RechunkerGroup(
-                self._chunk_store, self.sensors, capture_stream_name, self._arrays)
             writer = spead_write.SpeadWriter(rx)
+            rechunker_group = spead_write.RechunkerGroup(
+                self._chunk_store, writer.sensors, capture_stream_name, self._arrays)
             # mypy doesn't like overriding methods on an instance
             writer.rechunker_group = lambda updated: rechunker_group   # type: ignore
             writer.first_heap = self._first_heap                       # type: ignore
