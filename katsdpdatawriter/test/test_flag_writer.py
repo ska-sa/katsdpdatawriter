@@ -8,7 +8,8 @@ import asyncio
 
 import numpy as np
 import asynctest
-from nose.tools import assert_equal, assert_in, assert_true, assert_raises_regex, assert_logs
+from nose.tools import (assert_equal, assert_in, assert_true,
+                        assert_regex, assert_raises_regex, assert_logs)
 
 import aiokatcp
 import spead2
@@ -146,3 +147,11 @@ class TestFlagWriterServer(asynctest.TestCase):
         with assert_logs('katsdpdatawriter.flag_writer', 'WARNING'):
             await self.client.request('capture-done', self.cbid)
         self.assert_sensor_equals('capture-block-state', '{}')
+
+    async def test_data_after_done(self) -> None:
+        await self.client.request('capture-init', self.cbid)
+        await self.client.request('capture-done', self.cbid)
+        with assert_logs('katsdpdatawriter.flag_writer', 'WARNING') as cm:
+            await self.tx[0].async_send_heap(self.ig.get_heap())
+            await asyncio.sleep(0.5)
+        assert_regex(cm.output[0], 'outside of init/done')

@@ -101,14 +101,10 @@ class FlagWriterServer(DeviceServer):
 
     def _rechunker_group(self, updated: Dict[str, spead2.Item]) -> Optional[RechunkerGroup]:
         cbid = updated['capture_block_id'].value
-        cur_state = self._get_capture_block_state(cbid)
-        if cur_state == State.COMPLETE:
-            logger.error("Received flags for CBID %s after capture done. "
+        if not self._get_capture_block_state(cbid):
+            logger.error("Received flags for CBID %s outside of init/done. "
                          "These flags will be *discarded*.", cbid)
             return None
-        elif not cur_state:
-            logger.warning("Received flags for CBID %s unexpectedly (before an init).", cbid)
-            self._set_capture_block_state(cbid, State.CAPTURING)
 
         if cbid not in self._flag_streams:
             prefix = self._get_capture_stream_name(cbid)
