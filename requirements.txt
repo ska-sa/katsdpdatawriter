@@ -10,7 +10,7 @@ future
 hiredis
 idna
 ipaddress
-katpoint
+katpoint==0.7
 katversion
 netifaces
 numpy
