@@ -60,6 +60,7 @@ def add_sensors(sensors: SensorSet) -> None:
 
 def clear_input_sensors(sensors: SensorSet) -> None:
     """Zero the input counters in a sensor set"""
+    sensors['input-incomplete-heaps-total'].value = 0
     sensors['input-bytes-total'].value = 0
     sensors['input-heaps-total'].value = 0
     sensors['input-dumps-total'].value = 0
