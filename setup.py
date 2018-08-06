@@ -2,6 +2,8 @@
 from setuptools import setup, find_packages
 
 
+tests_require = ['asynctest', 'nose']
+
 setup(
     name="katsdpdatawriter",
     description="MeerKAT data writer",
@@ -19,4 +21,6 @@ setup(
         "attrs",
         "numpy"
     ],
+    extras_require={"test": tests_require},
+    tests_require=tests_require,
     use_katversion=True)
