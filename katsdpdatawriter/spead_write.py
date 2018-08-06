@@ -58,12 +58,18 @@ def add_sensors(sensors: SensorSet) -> None:
         "s"))
 
 
-def clear_input_sensors(sensors: SensorSet) -> None:
-    """Zero the input counters in a sensor set"""
-    sensors['input-incomplete-heaps-total'].value = 0
-    sensors['input-bytes-total'].value = 0
-    sensors['input-heaps-total'].value = 0
-    sensors['input-dumps-total'].value = 0
+def clear_io_sensors(sensors: SensorSet) -> None:
+    """Zero the input and output counters in a sensor set"""
+    now = time.time()
+    for name in ['input-incomplete-heaps-total',
+                 'input-bytes-total',
+                 'input-heaps-total',
+                 'input-dumps-total',
+                 'output-bytes-total',
+                 'output-chunks-total',
+                 'output-seconds-total']:
+        sensor = sensors[name]
+        sensor.set_value(sensor.stype(0), timestamp=now)
 
 
 @attr.s(frozen=True)

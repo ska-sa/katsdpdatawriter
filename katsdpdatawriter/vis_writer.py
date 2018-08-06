@@ -148,6 +148,7 @@ class VisibilityWriterServer(DeviceServer):
     async def _do_capture(self, capture_stream_name: str, rx: spead2.recv.asyncio.Stream) -> None:
         writer = None
         try:
+            spead_write.clear_io_sensors(self.sensors)
             rechunker_group = spead_write.RechunkerGroup(
                 self._chunk_store, self.sensors, capture_stream_name, self._arrays)
             writer = spead_write.SpeadWriter(self.sensors, rx)
@@ -173,7 +174,7 @@ class VisibilityWriterServer(DeviceServer):
             self.sensors['status'].value = Status.ERROR
             self.sensors['device-status'].value = DeviceStatus.FAIL
         finally:
-            spead_write.clear_input_sensors(self.sensors)
+            spead_write.clear_io_sensors(self.sensors)
 
     async def request_capture_init(self, ctx, capture_block_id: str = None) -> None:
         """Start listening for L0 data"""

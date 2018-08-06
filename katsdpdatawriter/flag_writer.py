@@ -119,13 +119,14 @@ class FlagWriterServer(DeviceServer):
 
     async def do_capture(self) -> None:
         try:
+            spead_write.clear_io_sensors(self.sensors)
             self.sensors['status'].value = Status.WAIT_DATA
             logger.info("Waiting for data...")
             await self._writer.run()
         except Exception:
             logger.exception("Error in SPEAD receiver")
         finally:
-            spead_write.clear_input_sensors(self.sensors)
+            spead_write.clear_io_sensors(self.sensors)
             self.sensors['status'].value = Status.FINISHED
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
