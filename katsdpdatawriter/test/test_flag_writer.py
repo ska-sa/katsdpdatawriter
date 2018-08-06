@@ -134,7 +134,8 @@ class TestFlagWriterServer(asynctest.TestCase):
         view = self.telstate.view(capture_stream)
         chunk_info = view['chunk_info']
         n_substreams = n_chans // n_chans_per_substream
-        assert_equal(chunk_info,
+        assert_equal(
+            chunk_info,
             {
                 'flags': {
                     'prefix': capture_stream,
