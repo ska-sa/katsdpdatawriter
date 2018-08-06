@@ -169,7 +169,8 @@ class SpeadWriter:
                 group = self.rechunker_group(updated)
                 # Check if subclass decided the heap was good
                 if group is not None:
-                    values = [ig[array.name].value for array in group.arrays]
+                    # Get values and add time dimension
+                    values = [ig[array.name].value[np.newaxis, ...] for array in group.arrays]
                     nbytes = sum(value.nbytes for value in values)
                     group.add((dump_index, channel0), values)
                     self.sensors['input-heaps-total'].value += 1

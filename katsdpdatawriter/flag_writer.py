@@ -19,14 +19,13 @@ from . import spead_write
 from .spead_write import RechunkerGroup, Array
 
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 class Status(enum.Enum):
-    IDLE = 1
-    WAIT_DATA = 2
-    CAPTURING = 3
-    FINISHED = 4
+    WAIT_DATA = 1
+    CAPTURING = 2
+    FINISHED = 3
 
 
 class State(enum.Enum):
@@ -66,7 +65,7 @@ class FlagWriterServer(DeviceServer):
         self.sensors.add(Sensor(
             str, "capture-block-state",
             "JSON dict with the state of each capture block seen in this session.",
-            default='{}'))
+            default='{}', initial_status=Sensor.Status.NOMINAL))
 
         in_chunks = spead_write.chunks_from_telstate(self._telstate_flags)
         out_chunks = in_chunks   # For now - will change later
@@ -88,16 +87,13 @@ class FlagWriterServer(DeviceServer):
         else:
             self._capture_block_state[capture_block_id] = state
         dumped = json.dumps(self._capture_block_state, sort_keys=True, cls=EnumEncoder)
-        self._capture_block_state_sensor.value = dumped
+        self.sensors['capture-block-state'].value = dumped
 
     def _get_capture_block_state(self, capture_block_id):
         return self._capture_block_state.get(capture_block_id, None)
 
     def _get_capture_stream_name(self, capture_block_id):
         return "{}_{}".format(capture_block_id, self._flags_name)
-
-    def stop_spead(self):
-        self._writer.stop()
 
     def _first_heap(self):
         logger.info("First flag heap received...")
@@ -172,3 +168,7 @@ class FlagWriterServer(DeviceServer):
         await asyncio.sleep(5, loop=self.loop)
         self._write_telstate_meta(capture_block_id)
         self._mark_cbid_complete(capture_block_id)
+
+    async def stop(self, cancel=True):
+        self._writer.stop()
+        await super().stop(cancel)
