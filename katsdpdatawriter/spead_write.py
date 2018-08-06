@@ -201,7 +201,7 @@ def chunks_from_telstate(telstate):
         n_chans_per_substream = telstate['n_chans_per_substream']
     except KeyError:
         logger.error("Unable to find sizing params (n_bls, n_chans, "
-                     "or n_chans_per_substream) for in telstate.")
+                     "or n_chans_per_substream) in telstate.")
         raise
 
     n_substreams = n_chans // n_chans_per_substream
