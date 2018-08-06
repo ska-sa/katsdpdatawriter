@@ -3,7 +3,7 @@ import logging
 import enum
 import json
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import spead2
@@ -13,6 +13,8 @@ import katdal
 import katdal.chunkstore_npy
 from katdal.visdatav4 import FLAG_NAMES
 from aiokatcp import DeviceServer, Sensor, FailReply
+import katsdptelstate
+from katsdptelstate.endpoint import Endpoint
 
 import katsdpdatawriter
 from . import spead_write
@@ -45,9 +47,10 @@ class FlagWriterServer(DeviceServer):
     VERSION = "sdp-flag-writer-0.2"
     BUILD_STATE = "katsdpdatawriter-" + katsdpdatawriter.__version__
 
-    def __init__(self, host, port, loop,
-                 endpoints, flag_interface, flags_ibv,
-                 npy_path, telstate, flags_name):
+    def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
+                 endpoints: List[Endpoint], flag_interface: Optional[str],
+                 flags_ibv: bool, npy_path: str,
+                 telstate: katsdptelstate.TelescopeState, flags_name: str) -> None:
         super().__init__(host, port, loop=loop)
 
         self._npy_path = npy_path
@@ -55,10 +58,10 @@ class FlagWriterServer(DeviceServer):
         self._telstate = telstate
         self._endpoints = endpoints
         # track the status of each capture block we have seen to date
-        self._capture_block_state = {}
+        self._capture_block_state = {}   # type: Dict[str, State]
         self._flags_name = flags_name
         # rechunker group for each CBID
-        self._flag_streams = {}
+        self._flag_streams = {}          # type: Dict[str, RechunkerGroup]
 
         self.sensors.add(Sensor(
             Status, "status", "The current status of the flag writer process."))
@@ -77,10 +80,11 @@ class FlagWriterServer(DeviceServer):
             self._endpoints, self._arrays,
             katsdpservices.get_interface_address(flag_interface), flags_ibv)
         self._writer = spead_write.SpeadWriter(rx)
-        self._writer.first_heap = self._first_heap
-        self._writer.rechunker_group = self._rechunker_group
+        # mypy doesn't like replacing methods on an instance
+        self._writer.first_heap = self._first_heap    # type: ignore
+        self._writer.rechunker_group = self._rechunker_group    # type: ignore
 
-    def _set_capture_block_state(self, capture_block_id, state):
+    def _set_capture_block_state(self, capture_block_id: str, state: State) -> None:
         if state == State.COMPLETE:
             # Remove if present
             self._capture_block_state.pop(capture_block_id, None)
@@ -89,13 +93,13 @@ class FlagWriterServer(DeviceServer):
         dumped = json.dumps(self._capture_block_state, sort_keys=True, cls=EnumEncoder)
         self.sensors['capture-block-state'].value = dumped
 
-    def _get_capture_block_state(self, capture_block_id):
+    def _get_capture_block_state(self, capture_block_id: str) -> Optional[State]:
         return self._capture_block_state.get(capture_block_id, None)
 
-    def _get_capture_stream_name(self, capture_block_id):
+    def _get_capture_stream_name(self, capture_block_id: str) -> str:
         return "{}_{}".format(capture_block_id, self._flags_name)
 
-    def _first_heap(self):
+    def _first_heap(self) -> None:
         logger.info("First flag heap received...")
         self.sensors['status'].value = Status.CAPTURING
 
@@ -112,7 +116,7 @@ class FlagWriterServer(DeviceServer):
                 self._chunk_store, self._writer.sensors, prefix, self._arrays)
         return self._flag_streams[cbid]
 
-    async def do_capture(self):
+    async def do_capture(self) -> None:
         try:
             self.sensors['status'].value = Status.WAIT_DATA
             logger.info("Waiting for data...")
@@ -129,7 +133,7 @@ class FlagWriterServer(DeviceServer):
             raise FailReply("Capture block ID {} is already active".format(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.CAPTURING)
 
-    def _mark_cbid_complete(self, capture_block_id):
+    def _mark_cbid_complete(self, capture_block_id: str) -> None:
         """Inform other users of the on disk data that we are finished with a
         particular capture_block_id.
         """
@@ -141,7 +145,7 @@ class FlagWriterServer(DeviceServer):
             os.utime(touch_file, None)
         self._set_capture_block_state(capture_block_id, State.COMPLETE)
 
-    def _write_telstate_meta(self, capture_block_id):
+    def _write_telstate_meta(self, capture_block_id: str) -> None:
         """Write out chunk information for the specified CBID to telstate."""
         if capture_block_id not in self._flag_streams:
             logger.warning("No flag data received for cbid %s. Flag stream will not be usable.",
@@ -165,6 +169,6 @@ class FlagWriterServer(DeviceServer):
         self._write_telstate_meta(capture_block_id)
         self._mark_cbid_complete(capture_block_id)
 
-    async def stop(self, cancel=True):
+    async def stop(self, cancel: bool = True) -> None:
         self._writer.stop()
         await super().stop(cancel)
