@@ -105,6 +105,7 @@ class TestFlagWriterServer(asynctest.TestCase):
         assert_in(self.server.sensors[name].status, status)
 
     async def test_capture(self) -> None:
+        n_chans = self.telstate['n_chans']
         n_chans_per_substream = self.telstate['n_chans_per_substream']
         n_bls = self.telstate['n_bls']
         self.assert_sensor_equals('status', Status.WAIT_DATA)
@@ -129,6 +130,20 @@ class TestFlagWriterServer(asynctest.TestCase):
             store.join(capture_stream, 'flags'),
             np.s_[0:1, 0:n_chans_per_substream, 0:n_bls], np.uint8)
         np.testing.assert_array_equal(self.ig['flags'].value[np.newaxis], chunk)
+
+        view = self.telstate.view(capture_stream)
+        chunk_info = view['chunk_info']
+        n_substreams = n_chans // n_chans_per_substream
+        assert_equal(chunk_info,
+            {
+                'flags': {
+                    'prefix': capture_stream,
+                    'shape': (1, n_chans, n_bls),
+                    'chunks': ((1,), (n_chans_per_substream,) * n_substreams, (n_bls,)),
+                    'dtype': np.dtype(np.uint8)
+                }
+            })
+        assert_in('chunk_info', view)
 
     async def test_double_init(self) -> None:
         await self.client.request('capture-init', self.cbid)
