@@ -10,7 +10,10 @@ setup(
     author="SARAO",
     author_email="spt@ska.ac.za",
     packages=find_packages(),
-    scripts=["scripts/flag_writer.py"],
+    scripts=[
+        "scripts/flag_writer.py",
+        "scripts/vis_writer.py"
+    ],
     setup_requires=["katversion"],
     install_requires=[
         "aiokatcp>=0.3.0",     # Needed for status_func
