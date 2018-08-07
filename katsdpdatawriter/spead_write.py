@@ -223,14 +223,14 @@ class SpeadWriter:
 
         The default does nothing, but may be overridden
         """
-        pass
+        pass    # pragma: no cover
 
     def rechunker_group(self, updated: Dict[str, spead2.Item]) -> Optional[RechunkerGroup]:
         """Obtain the rechunker group associated with a particular heap.
 
         This must be implemented in derived classes.
         """
-        raise NotImplementedError
+        raise NotImplementedError    # pragma: no cover
 
 
 def chunks_from_telstate(telstate):

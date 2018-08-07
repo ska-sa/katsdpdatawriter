@@ -39,11 +39,11 @@ import os
 import asyncio
 import logging
 import enum
-from typing import List, Tuple, Any, Optional   # noqa: F401
+from typing import List, Tuple, Dict, Any, Optional   # noqa: F401
 
 import numpy as np
 import aiokatcp
-from aiokatcp import DeviceServer, Sensor, FailReply
+from aiokatcp import DeviceServer, Sensor, SensorSet, FailReply
 from katdal.visdatav4 import FLAG_NAMES
 import katdal.chunkstore
 import katsdptelstate
@@ -86,6 +86,19 @@ def _make_array(name, in_chunks: Tuple[Tuple[int]],
     return spead_write.Array(name, in_chunks, out_chunks, fill_value, dtype)
 
 
+class VisibilityWriter(spead_write.SpeadWriter):
+    def __init__(self, sensors: SensorSet, rx: spead2.recv.asyncio.Stream,
+                 rechunker_group: spead_write.RechunkerGroup) -> None:
+        super().__init__(sensors, rx)
+        self._rechunker_group = rechunker_group
+
+    def first_heap(self) -> None:
+        self.sensors['status'].value = Status.CAPTURING
+
+    def rechunker_group(self, updated: Dict) -> spead_write.RechunkerGroup:
+        return self._rechunker_group
+
+
 class VisibilityWriterServer(DeviceServer):
     VERSION = "sdp-vis-writer-0.2"
     BUILD_STATE = "katsdpdatawriter-" + katsdpdatawriter.__version__
@@ -122,19 +135,13 @@ class VisibilityWriterServer(DeviceServer):
             self.sensors.add(sensor)
         self.sensors.add(spead_write.device_status_sensor())
 
-    def _first_heap(self):
-        self.sensors['status'].value = Status.CAPTURING
-
     async def _do_capture(self, capture_stream_name: str, rx: spead2.recv.asyncio.Stream) -> None:
         writer = None
         try:
             spead_write.clear_io_sensors(self.sensors)
             rechunker_group = spead_write.RechunkerGroup(
                 self._chunk_store, self.sensors, capture_stream_name, self._arrays)
-            writer = spead_write.SpeadWriter(self.sensors, rx)
-            # mypy doesn't like overriding methods on an instance
-            writer.rechunker_group = lambda updated: rechunker_group   # type: ignore
-            writer.first_heap = self._first_heap                       # type: ignore
+            writer = VisibilityWriter(self.sensors, rx, rechunker_group)
             self.sensors['status'].value = Status.WAIT_DATA
 
             await writer.run(stops=self._n_substreams)

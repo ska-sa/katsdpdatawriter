@@ -12,7 +12,7 @@ import katsdpservices
 import katdal
 import katdal.chunkstore
 from katdal.visdatav4 import FLAG_NAMES
-from aiokatcp import DeviceServer, Sensor, FailReply
+from aiokatcp import DeviceServer, Sensor, SensorSet, FailReply
 import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
 
@@ -41,6 +41,21 @@ class EnumEncoder(json.JSONEncoder):
         if isinstance(obj, enum.Enum):
             return obj.name
         return json.JSONEncoder.default(self, obj)
+
+
+class FlagWriter(spead_write.SpeadWriter):
+    def __init__(self, sensors: SensorSet, rx: spead2.recv.asyncio.Stream,
+                 server: 'FlagWriterServer') -> None:
+        super().__init__(sensors, rx)
+        self._server = server
+
+    def first_heap(self) -> None:
+        logger.info("First flag heap received...")
+        self.sensors['status'].value = Status.CAPTURING
+
+    def rechunker_group(self, updated: Dict[str, spead2.Item]) -> Optional[RechunkerGroup]:
+        cbid = updated['capture_block_id'].value
+        return self._server.rechunker_group(cbid)
 
 
 class FlagWriterServer(DeviceServer):
@@ -81,10 +96,7 @@ class FlagWriterServer(DeviceServer):
         rx = spead_write.make_receiver(
             self._endpoints, self._arrays,
             katsdpservices.get_interface_address(flag_interface), flags_ibv)
-        self._writer = spead_write.SpeadWriter(self.sensors, rx)
-        # mypy doesn't like replacing methods on an instance
-        self._writer.first_heap = self._first_heap    # type: ignore
-        self._writer.rechunker_group = self._rechunker_group    # type: ignore
+        self._writer = FlagWriter(self.sensors, rx, self)
 
     def _set_capture_block_state(self, capture_block_id: str, state: State) -> None:
         if state == State.COMPLETE:
@@ -101,12 +113,7 @@ class FlagWriterServer(DeviceServer):
     def _get_capture_stream_name(self, capture_block_id: str) -> str:
         return "{}_{}".format(capture_block_id, self._flags_name)
 
-    def _first_heap(self) -> None:
-        logger.info("First flag heap received...")
-        self.sensors['status'].value = Status.CAPTURING
-
-    def _rechunker_group(self, updated: Dict[str, spead2.Item]) -> Optional[RechunkerGroup]:
-        cbid = updated['capture_block_id'].value
+    def rechunker_group(self, cbid: str) -> Optional[RechunkerGroup]:
         if not self._get_capture_block_state(cbid):
             logger.error("Received flags for CBID %s outside of init/done. "
                          "These flags will be *discarded*.", cbid)
