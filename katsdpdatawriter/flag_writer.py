@@ -69,7 +69,9 @@ class FlagWriterServer(DeviceServer):
             str, "capture-block-state",
             "JSON dict with the state of each capture block seen in this session.",
             default='{}', initial_status=Sensor.Status.NOMINAL))
-        spead_write.add_sensors(self.sensors)
+        for sensor in spead_write.io_sensors():
+            self.sensors.add(sensor)
+        self.sensors.add(spead_write.device_status_sensor())
 
         in_chunks = spead_write.chunks_from_telstate(self._telstate_flags)
         out_chunks = in_chunks   # For now - will change later
@@ -124,6 +126,7 @@ class FlagWriterServer(DeviceServer):
             await self._writer.run()
         except Exception:
             logger.exception("Error in SPEAD receiver")
+            self.sensors['device-status'].value = spead_write.DeviceStatus.FAIL
         finally:
             spead_write.clear_io_sensors(self.sensors)
             self.sensors['status'].value = Status.FINISHED

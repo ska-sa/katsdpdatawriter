@@ -67,29 +67,11 @@ class Status(enum.Enum):
     ERROR = 6
 
 
-# TODO: move this into aiokatcp
-class DeviceStatus(enum.Enum):
-    """Standard katcp device status"""
-    OK = 0
-    DEGRADED = 1
-    FAIL = 2
-
-
 def _status_status(value: Status) -> aiokatcp.Sensor.Status:
     if value == Status.ERROR:
         return Sensor.Status.ERROR
     else:
         return Sensor.Status.NOMINAL
-
-
-def _device_status_status(value: DeviceStatus) -> aiokatcp.Sensor.Status:
-    """Sets katcp status for device-status sensor from value"""
-    if value == DeviceStatus.OK:
-        return Sensor.Status.NOMINAL
-    elif value == DeviceStatus.DEGRADED:
-        return Sensor.Status.WARN
-    else:
-        return Sensor.Status.ERROR
 
 
 def _make_array(name, in_chunks: Tuple[Tuple[int]],
@@ -136,11 +118,9 @@ class VisibilityWriterServer(DeviceServer):
             Status, 'status', 'The current status of the capture process',
             default=Status.IDLE, initial_status=Sensor.Status.NOMINAL,
             status_func=_status_status))
-        self.sensors.add(Sensor(
-            DeviceStatus, 'device-status', 'Health sensor',
-            default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL,
-            status_func=_device_status_status))
-        spead_write.add_sensors(self.sensors)
+        for sensor in spead_write.io_sensors():
+            self.sensors.add(sensor)
+        self.sensors.add(spead_write.device_status_sensor())
 
     def _first_heap(self):
         self.sensors['status'].value = Status.CAPTURING
@@ -172,7 +152,7 @@ class VisibilityWriterServer(DeviceServer):
         except Exception:
             logger.exception('Exception in capture task')
             self.sensors['status'].value = Status.ERROR
-            self.sensors['device-status'].value = DeviceStatus.FAIL
+            self.sensors['device-status'].value = spead_write.DeviceStatus.FAIL
         finally:
             spead_write.clear_io_sensors(self.sensors)
 
@@ -182,7 +162,7 @@ class VisibilityWriterServer(DeviceServer):
             logger.info("Ignoring capture_init because already capturing")
             raise FailReply('Already capturing')
         self.sensors['status'].value = Status.WAIT_DATA
-        self.sensors['device-status'].value = DeviceStatus.OK
+        self.sensors['device-status'].value = spead_write.DeviceStatus.OK
         sep = self._telstate_l0.SEPARATOR
         capture_stream_name = sep.join((capture_block_id, self._stream_name))
         self._rx = spead_write.make_receiver(

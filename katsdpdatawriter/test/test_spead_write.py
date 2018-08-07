@@ -8,7 +8,7 @@ import spead2.send
 import spead2.recv.asyncio
 from katdal.chunkstore import ChunkStore
 
-from ..spead_write import Array, RechunkerGroup, SpeadWriter, add_sensors
+from ..spead_write import Array, RechunkerGroup, SpeadWriter, io_sensors
 from ..rechunk import Offset
 
 
@@ -46,7 +46,8 @@ class TestRechunkerGroup:
         self.chunk_store.join = _join
 
         self.sensors = SensorSet(set())
-        add_sensors(self.sensors)
+        for sensor in io_sensors():
+            self.sensors.add(sensor)
 
         self.arrays = [
             Array('weights',
@@ -120,7 +121,8 @@ class TestSpeadWriter:
         rx.stop_on_stop_item = False
         rx.add_inproc_reader(self.inproc_queue)
         sensors = SensorSet(set())
-        add_sensors(sensors)
+        for sensor in io_sensors():
+            sensors.add(sensor)
         self.writer = SpeadWriter(sensors, rx)
 
     def test(self) -> None:

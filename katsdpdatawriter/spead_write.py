@@ -3,6 +3,7 @@ Receive heaps from a SPEAD stream and write corresponding data to a chunk store.
 """
 
 import time
+import enum
 import logging
 from typing import Optional, Any, Sequence, Iterable, Dict
 
@@ -19,6 +20,24 @@ from .rechunk import Chunks, Offset
 logger = logging.getLogger(__name__)
 
 
+# TODO: move this into aiokatcp
+class DeviceStatus(enum.Enum):
+    """Standard katcp device status"""
+    OK = 0
+    DEGRADED = 1
+    FAIL = 2
+
+
+def _device_status_status(value: DeviceStatus) -> Sensor.Status:
+    """Sets katcp status for device-status sensor from value"""
+    if value == DeviceStatus.OK:
+        return Sensor.Status.NOMINAL
+    elif value == DeviceStatus.DEGRADED:
+        return Sensor.Status.WARN
+    else:
+        return Sensor.Status.ERROR
+
+
 def _warn_if_positive(value: float) -> Sensor.Status:
     return Sensor.Status.WARN if value > 0 else Sensor.Status.NOMINAL
 
@@ -28,34 +47,42 @@ def _dtype_converter(dtype: Any) -> np.dtype:
     return np.dtype(dtype)
 
 
-def add_sensors(sensors: SensorSet) -> None:
-    """Add input and output counters to a server's sensors."""
-    sensors.add(Sensor(
-        int, "input-incomplete-heaps-total",
-        "Number of heaps dropped due to being incomplete. (prometheus: counter)",
-        status_func=_warn_if_positive))
-    sensors.add(Sensor(
-        int, "input-bytes-total",
-        "Number of payload bytes received in this session. (prometheus: counter)",
-        "B"))
-    sensors.add(Sensor(
-        int, "input-heaps-total",
-        "Number of input heaps captured in this session. (prometheus: counter)"))
-    sensors.add(Sensor(
-        int, "input-dumps-total",
-        "Number of complete input dumps captured in this session. (prometheus: counter)"))
+def io_sensors() -> Sequence[Sensor]:
+    """Create input and output counter sensors."""
+    return [
+        Sensor(
+            int, "input-incomplete-heaps-total",
+            "Number of heaps dropped due to being incomplete. (prometheus: counter)",
+            status_func=_warn_if_positive),
+        Sensor(
+            int, "input-bytes-total",
+            "Number of payload bytes received in this session. (prometheus: counter)",
+            "B"),
+        Sensor(
+            int, "input-heaps-total",
+            "Number of input heaps captured in this session. (prometheus: counter)"),
+        Sensor(
+            int, "input-dumps-total",
+            "Number of complete input dumps captured in this session. (prometheus: counter)"),
+        Sensor(
+            int, "output-bytes-total",
+            "Number of payload bytes written to chunk store in this session. (prometheus: counter)",
+            "B"),
+        Sensor(
+            int, "output-chunks-total",
+            "Number of chunks written to chunk store in this session. (prometheus: counter)"),
+        Sensor(
+            float, "output-seconds-total",
+            "Accumulated time spent writing flag dumps. (prometheus: counter)",
+            "s")
+    ]
 
-    sensors.add(Sensor(
-        int, "output-bytes-total",
-        "Number of payload bytes written to chunk store in this session. (prometheus: counter)",
-        "B"))
-    sensors.add(Sensor(
-        int, "output-chunks-total",
-        "Number of chunks written to chunk store in this session. (prometheus: counter)"))
-    sensors.add(Sensor(
-        float, "output-seconds-total",
-        "Accumulated time spent writing flag dumps. (prometheus: counter)",
-        "s"))
+
+def device_status_sensor() -> Sensor:
+    """Create a sensor to track device status"""
+    return Sensor(DeviceStatus, 'device-status', 'Health sensor',
+                  default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL,
+                  status_func=_device_status_status)
 
 
 def clear_io_sensors(sensors: SensorSet) -> None:
