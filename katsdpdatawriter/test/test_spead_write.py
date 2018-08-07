@@ -3,12 +3,9 @@ from unittest import mock
 import numpy as np
 from nose.tools import assert_equal, assert_is_instance
 from aiokatcp import SensorSet
-import spead2
-import spead2.send
-import spead2.recv.asyncio
 from katdal.chunkstore import ChunkStore
 
-from ..spead_write import Array, RechunkerGroup, SpeadWriter, io_sensors
+from ..spead_write import Array, RechunkerGroup, io_sensors
 from ..rechunk import Offset
 
 
