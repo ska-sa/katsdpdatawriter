@@ -33,7 +33,6 @@ async def run(loop: asyncio.AbstractEventLoop, server: FlagWriterServer) -> None
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
     logger.info("Started flag writer server.")
-    await server.do_capture()
     await server.join()
 
 

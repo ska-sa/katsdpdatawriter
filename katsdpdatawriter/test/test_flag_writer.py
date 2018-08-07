@@ -53,7 +53,6 @@ class TestFlagWriterServer(BaseTestWriterServer):
         for queue in self.inproc_queues.values():
             queue.stop()
         await self.server.stop()
-        await self.capture_task
 
     async def setUp(self) -> None:
         self.npy_path = tempfile.mkdtemp()
@@ -65,7 +64,6 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.server = await self.setup_server()
         self.client = await self.setup_client(self.server)
         self.ig = self.setup_ig()
-        self.capture_task = self.loop.create_task(self.server.do_capture())
 
     async def test_capture(self) -> None:
         n_chans = self.telstate['n_chans']

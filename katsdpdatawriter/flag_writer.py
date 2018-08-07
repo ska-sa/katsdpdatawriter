@@ -102,6 +102,7 @@ class FlagWriterServer(DeviceServer):
             self._endpoints, self._arrays,
             katsdpservices.get_interface_address(flag_interface), flags_ibv)
         self._writer = FlagWriter(self.sensors, rx, self)
+        self._capture_task = loop.create_task(self._do_capture())
 
     def _set_capture_block_state(self, capture_block_id: str, state: State) -> None:
         if state == State.COMPLETE:
@@ -130,10 +131,10 @@ class FlagWriterServer(DeviceServer):
                 self._chunk_store, self._writer.sensors, prefix, self._arrays)
         return self._flag_streams[cbid]
 
-    async def do_capture(self) -> None:
+    async def _do_capture(self) -> None:
         """Run the entire capture process.
 
-        This is intended to run for the lifetime of the server.
+        This runs for the lifetime of the server.
         """
         try:
             spead_write.clear_io_sensors(self.sensors)
@@ -192,4 +193,5 @@ class FlagWriterServer(DeviceServer):
 
     async def stop(self, cancel: bool = True) -> None:
         self._writer.stop()
+        await self._capture_task
         await super().stop(cancel)
