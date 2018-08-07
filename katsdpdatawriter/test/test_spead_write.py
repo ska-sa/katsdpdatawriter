@@ -114,17 +114,4 @@ class TestRechunkerGroup:
             })
 
 
-class TestSpeadWriter:
-    def setup(self) -> None:
-        self.inproc_queue = spead2.InprocQueue()
-        rx = spead2.recv.asyncio.Stream(spead2.ThreadPool())
-        rx.stop_on_stop_item = False
-        rx.add_inproc_reader(self.inproc_queue)
-        sensors = SensorSet(set())
-        for sensor in io_sensors():
-            sensors.add(sensor)
-        self.writer = SpeadWriter(sensors, rx)
-
-    def test(self) -> None:
-        # TODO: implement
-        pass
+# SpeadWriter gets exercised via its derived classes
