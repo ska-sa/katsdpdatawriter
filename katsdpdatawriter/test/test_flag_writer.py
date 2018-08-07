@@ -22,7 +22,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
     async def setup_server(self) -> FlagWriterServer:
         server = FlagWriterServer(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
-            flag_interface='lo', flags_ibv=False, npy_path=self.npy_path,
+            flag_interface='lo', flags_ibv=False, chunk_store=self.chunk_store,
             telstate=self.telstate, flags_name='sdp_l1_flags')
         await server.start()
         self.addCleanup(server.stop)
@@ -59,6 +59,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
     async def setUp(self) -> None:
         self.npy_path = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.npy_path)
+        self.chunk_store = NpyFileChunkStore(self.npy_path)
         self.telstate = self.setup_telstate()
         self.setup_spead()
         self.server = await self.setup_server()
@@ -87,9 +88,8 @@ class TestFlagWriterServer(BaseTestWriterServer):
         capture_stream = self.cbid + '_sdp_l1_flags'
         assert_true(os.path.exists(
             os.path.join(self.npy_path, capture_stream, 'complete')))
-        store = NpyFileChunkStore(self.npy_path)
-        chunk = store.get_chunk(
-            store.join(capture_stream, 'flags'),
+        chunk = self.chunk_store.get_chunk(
+            self.chunk_store.join(capture_stream, 'flags'),
             np.s_[0:1, 0:n_chans_per_substream, 0:n_bls], np.uint8)
         np.testing.assert_array_equal(self.ig['flags'].value[np.newaxis], chunk)
 

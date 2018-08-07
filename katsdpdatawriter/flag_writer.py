@@ -10,7 +10,7 @@ import spead2
 import spead2.recv.asyncio
 import katsdpservices
 import katdal
-import katdal.chunkstore_npy
+import katdal.chunkstore
 from katdal.visdatav4 import FLAG_NAMES
 from aiokatcp import DeviceServer, Sensor, FailReply
 import katsdptelstate
@@ -49,11 +49,11 @@ class FlagWriterServer(DeviceServer):
 
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
                  endpoints: List[Endpoint], flag_interface: Optional[str],
-                 flags_ibv: bool, npy_path: str,
+                 flags_ibv: bool, chunk_store: katdal.chunkstore.ChunkStore,
                  telstate: katsdptelstate.TelescopeState, flags_name: str) -> None:
         super().__init__(host, port, loop=loop)
 
-        self._npy_path = npy_path
+        self._chunk_store = chunk_store
         self._telstate_flags = telstate.view(flags_name)
         self._telstate = telstate
         self._endpoints = endpoints
@@ -75,7 +75,6 @@ class FlagWriterServer(DeviceServer):
         out_chunks = in_chunks   # For now - will change later
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
         self._arrays = [Array('flags', in_chunks, out_chunks, DATA_LOST, np.uint8)]
-        self._chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(npy_path)
 
         rx = spead_write.make_receiver(
             self._endpoints, self._arrays,
@@ -140,7 +139,8 @@ class FlagWriterServer(DeviceServer):
         particular capture_block_id.
         """
         logger.info("Capture block %s flag capture complete.", capture_block_id)
-        touch_file = os.path.join(self._npy_path, self._get_capture_stream_name(capture_block_id),
+        touch_file = os.path.join(self._chunk_store.path,
+                                  self._get_capture_stream_name(capture_block_id),
                                   "complete")
         os.makedirs(os.path.dirname(touch_file), exist_ok=True)
         with open(touch_file, 'a'):
