@@ -1,4 +1,6 @@
+aioconsole
 aiokatcp
+aiomonitor
 attrs==18.1.0
 certifi
 dask
@@ -19,6 +21,7 @@ redis
 requests
 six
 spead2
+terminaltables
 toolz
 
 git+ssh://git@github.com/ska-sa/katdal@python3#egg=katdal

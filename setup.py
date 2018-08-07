@@ -22,6 +22,7 @@ setup(
         "katsdpservices",
         "katdal",
         "attrs",
+        "aiomonitor",
         "numpy"
     ],
     extras_require={"test": tests_require},
