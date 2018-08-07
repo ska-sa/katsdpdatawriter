@@ -38,6 +38,7 @@ def _offset_to_size_1d(chunks: Chunks1D) -> Dict[int, int]:
 
 
 def _offset_to_size(chunks: Chunks) -> Tuple[Dict[int, int], ...]:
+    """Multi-dimensional version of :func:`_offset_to_size_1d`."""
     return tuple(_offset_to_size_1d(c) for c in chunks)
 
 
@@ -85,6 +86,7 @@ def _split_chunks_1d(in_chunks: Chunks1D, out_chunks: Chunks1D) -> Dict[int, Sli
 
 
 def _split_chunks(in_chunks: Chunks, out_chunks: Chunks) -> Tuple[Dict[int, Slices], ...]:
+    """Multi-dimensional version of :meth:`_split_chunks_1d`."""
     if len(in_chunks) != len(out_chunks):
         raise ValueError('in_chunks and out_chunks have different length')
     return tuple(_split_chunks_1d(*item) for item in zip(in_chunks, out_chunks))
@@ -130,6 +132,11 @@ class Rechunker:
         chunks that combine to form an output chunk.
     dtype : numpy dtype
         Data type of the array
+
+    Raises
+    ------
+    ValueError
+        if the restrictions on the input and output chunks are not met
     """
 
     class _Item:
@@ -143,6 +150,7 @@ class Rechunker:
             self.value = initial_value
 
         def add(self, offset: Offset, value: np.ndarray) -> None:
+            """Add a new input chunk."""
             assert offset[1:] == self.offset[1:]
             if value.shape[1:] != self.value.shape[1:] or value.shape[0] != 1:
                 raise ValueError('value has wrong shape')
@@ -179,10 +187,12 @@ class Rechunker:
             self.name, received, seen)         # pragma: nocover
 
     def _item_shape(self, offset: Offset) -> Shape:
+        """Expected shape for the :class:`Item` holding the input chunk starting at `offset`."""
         sizes = tuple(s[ofs] for ofs, s in zip(offset[1:], self._sizes))
         return (self._time_accum,) + sizes
 
     def _flush(self, item: _Item) -> None:
+        """Send `item` to :meth:`output`."""
         slices = tuple(s[ofs] for ofs, s in zip(item.offset[1:], self._split_chunks))
         for idx in itertools.product(*slices):
             full_idx = np.index_exp[0:len(item.value)] + idx
@@ -190,6 +200,10 @@ class Rechunker:
             self.output(offset, item.value[full_idx])
 
     def _get_item(self, offset: Offset) -> Optional[_Item]:
+        """Get the item that should hold the input chunk starting at `offset`.
+
+        It returns ``None`` if the offset is too far in the past to be captured.
+        """
         key = offset[1:]
         # Round down to the start of the accumulation
         item_offset = (offset[0] // self._time_accum * self._time_accum,) + key
@@ -243,6 +257,7 @@ class Rechunker:
         self._n_dumps = max(self._n_dumps, offset[0] + 1)
 
     def close(self) -> None:
+        """Flush out any partially buffered items"""
         for item in self._items.values():
             # Truncate to last seen dump
             times = self._n_dumps - item.offset[0]
@@ -265,6 +280,13 @@ class Rechunker:
         return (time_chunks,) + self.out_chunks[1:]
 
     def get_chunk_info(self, prefix: str) -> Dict[str, Any]:
+        """Get chunk info to be placed into telstate to describe the output.
+
+        Parameters
+        ----------
+        prefix : str
+            The array name prefix to retrieve the chunks from the chunk store
+        """
         return {
             'prefix': prefix,
             'dtype': self.dtype,
@@ -273,4 +295,5 @@ class Rechunker:
         }
 
     def output(self, offset: Offset, value: np.ndarray) -> None:
+        """Called with each output chunk."""
         raise NotImplementedError      # pragma: nocover

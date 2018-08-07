@@ -87,6 +87,7 @@ def _make_array(name, in_chunks: Tuple[Tuple[int]],
 
 
 class VisibilityWriter(spead_write.SpeadWriter):
+    """Glue between :class:`~.SpeadWriter` and :class:`VisibilityWriterServer`."""
     def __init__(self, sensors: SensorSet, rx: spead2.recv.asyncio.Stream,
                  rechunker_group: spead_write.RechunkerGroup) -> None:
         super().__init__(sensors, rx)
@@ -136,6 +137,7 @@ class VisibilityWriterServer(DeviceServer):
         self.sensors.add(spead_write.device_status_sensor())
 
     async def _do_capture(self, capture_stream_name: str, rx: spead2.recv.asyncio.Stream) -> None:
+        """Capture data for a single capture block"""
         writer = None
         try:
             spead_write.clear_io_sensors(self.sensors)

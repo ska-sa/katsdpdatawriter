@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class Status(enum.Enum):
+    """Status of the whole process"""
     WAIT_DATA = 1
     CAPTURING = 2
     FINISHED = 3
@@ -37,6 +38,7 @@ class State(enum.Enum):
 
 
 class EnumEncoder(json.JSONEncoder):
+    """JSON encoder that stringifies enums"""
     def default(self, obj: Any) -> Any:
         if isinstance(obj, enum.Enum):
             return obj.name
@@ -44,6 +46,7 @@ class EnumEncoder(json.JSONEncoder):
 
 
 class FlagWriter(spead_write.SpeadWriter):
+    """Glue between :class:`~.SpeadWriter` and :class:`FlagWriterServer`."""
     def __init__(self, sensors: SensorSet, rx: spead2.recv.asyncio.Stream,
                  server: 'FlagWriterServer') -> None:
         super().__init__(sensors, rx)
@@ -59,6 +62,8 @@ class FlagWriter(spead_write.SpeadWriter):
 
 
 class FlagWriterServer(DeviceServer):
+    """Top-level device server for flag writer service"""
+
     VERSION = "sdp-flag-writer-0.2"
     BUILD_STATE = "katsdpdatawriter-" + katsdpdatawriter.__version__
 
@@ -126,6 +131,10 @@ class FlagWriterServer(DeviceServer):
         return self._flag_streams[cbid]
 
     async def do_capture(self) -> None:
+        """Run the entire capture process.
+
+        This is intended to run for the lifetime of the server.
+        """
         try:
             spead_write.clear_io_sensors(self.sensors)
             self.sensors['status'].value = Status.WAIT_DATA
