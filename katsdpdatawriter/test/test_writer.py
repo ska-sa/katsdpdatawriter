@@ -1,6 +1,7 @@
 """Base functionality for :mod:`test_vis_writer` and :mod:`test_flag_writer`"""
 
 from unittest import mock
+import asyncio
 
 import asynctest
 
@@ -8,6 +9,7 @@ import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
 import aiokatcp
 import spead2
+import spead2.recv.asyncio
 from nose.tools import assert_equal, assert_in
 
 
@@ -35,6 +37,17 @@ class BaseTestWriterServer(asynctest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+        async def get(stream, loop=None):
+            heap = await orig_get(stream, loop)
+            self.received_heaps.release()
+            return heap
+
+        self.received_heaps = asyncio.Semaphore(value=0, loop=self.loop)
+        orig_get = spead2.recv.asyncio.Stream.get
+        patcher = mock.patch('spead2.recv.asyncio.Stream.get', get)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def setup_client(self, server: aiokatcp.DeviceServer) -> aiokatcp.Client:
         assert server.server is not None, "Server has not been started"
         # mypy doesn't know about asyncio.base_events.Server, which has the 'sockets' member
@@ -47,3 +60,14 @@ class BaseTestWriterServer(asynctest.TestCase):
     def assert_sensor_equals(self, name, value, status=frozenset([aiokatcp.Sensor.Status.NOMINAL])):
         assert_equal(self.server.sensors[name].value, value)
         assert_in(self.server.sensors[name].status, status)
+
+    async def send_heap(self, tx, heap):
+        """Send a heap and wait for it to be received.
+
+        .. note:: This only works if all heaps are sent through this interface.
+        """
+        assert self.received_heaps.locked()
+        await tx.async_send_heap(heap)
+        # The above just waits until it's been transmitted into the inproc
+        # queue, but we want to wait until it's come out the other end.
+        await self.received_heaps.acquire()

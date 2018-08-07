@@ -3,7 +3,6 @@
 import os.path
 import tempfile
 import shutil
-import asyncio
 
 import numpy as np
 from nose.tools import (assert_equal, assert_in, assert_true,
@@ -77,8 +76,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
         await self.client.request('capture-init', self.cbid)
         self.assert_sensor_equals('capture-block-state', '{"%s": "CAPTURING"}' % self.cbid)
 
-        await self.tx[0].async_send_heap(self.ig.get_heap())
-        await asyncio.sleep(0.5)  # Give time for the heap to arrive
+        await self.send_heap(self.tx[0], self.ig.get_heap())
         self.assert_sensor_equals('status', Status.CAPTURING)
 
         await self.client.request('capture-done', self.cbid)
@@ -130,6 +128,5 @@ class TestFlagWriterServer(BaseTestWriterServer):
         await self.client.request('capture-init', self.cbid)
         await self.client.request('capture-done', self.cbid)
         with assert_logs('katsdpdatawriter.flag_writer', 'WARNING') as cm:
-            await self.tx[0].async_send_heap(self.ig.get_heap())
-            await asyncio.sleep(0.5)
+            await self.send_heap(self.tx[0], self.ig.get_heap())
         assert_regex(cm.output[0], 'outside of init/done')

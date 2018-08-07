@@ -2,7 +2,6 @@
 
 import tempfile
 import shutil
-import asyncio
 
 import numpy as np
 import katdal.chunkstore_npy
@@ -80,14 +79,12 @@ class TestVisWriterServer(BaseTestWriterServer):
         await self.client.request('capture-init', cbid)
         self.assert_sensor_equals('status', Status.WAIT_DATA)
         for tx in self.tx:
-            await tx.async_send_heap(self.ig.get_start())
-        await self.tx[0].async_send_heap(self.ig.get_heap())
-        await asyncio.sleep(0.5)
+            await self.send_heap(tx, self.ig.get_start())
+        await self.send_heap(self.tx[0], self.ig.get_heap())
         self.assert_sensor_equals('status', Status.CAPTURING)
         self.assert_sensor_equals('input-heaps-total', 1)
         for tx in self.tx:
-            await tx.async_send_heap(self.ig.get_end())
-        await asyncio.sleep(0.5)
+            await self.send_heap(tx, self.ig.get_end())
         self.assert_sensor_equals('status', Status.COMPLETE)
         await self.client.request('capture-done')
         self.assert_sensor_equals('status', Status.IDLE)
@@ -96,10 +93,10 @@ class TestVisWriterServer(BaseTestWriterServer):
         cbid = '1234567890'
         await self.client.request('capture-init', cbid)
         for tx in self.tx:
-            await tx.async_send_heap(self.ig.get_start())
-        await self.tx[0].async_send_heap(self.ig.get_heap())
+            await self.send_heap(tx, self.ig.get_start())
+        await self.send_heap(self.tx[0], self.ig.get_heap())
         for tx in self.tx[:-1]:
-            await tx.async_send_heap(self.ig.get_end())
+            await self.send_heap(tx, self.ig.get_end())
         await self.client.request('capture-done')
 
     async def test_double_init(self) -> None:
