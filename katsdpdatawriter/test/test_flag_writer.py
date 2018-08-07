@@ -60,6 +60,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.addCleanup(shutil.rmtree, self.npy_path)
         self.chunk_store = NpyFileChunkStore(self.npy_path)
         self.telstate = self.setup_telstate()
+        self.setup_sleep()
         self.setup_spead()
         self.server = await self.setup_server()
         self.client = await self.setup_client(self.server)

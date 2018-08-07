@@ -68,6 +68,7 @@ class TestVisWriterServer(BaseTestWriterServer):
         self.addCleanup(shutil.rmtree, npy_path)
         self.chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(npy_path)
         self.telstate = self.setup_telstate()
+        self.setup_sleep()
         self.setup_spead()
         self.server = await self.setup_server()
         self.client = await self.setup_client(self.server)

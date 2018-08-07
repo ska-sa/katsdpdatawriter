@@ -23,6 +23,18 @@ class BaseTestWriterServer(asynctest.TestCase):
         telstate.add('n_bls', n_ants * (n_ants + 1) * 2, immutable=True)
         return telstate
 
+    def setup_sleep(self) -> None:
+        """Patch loop.call_later so that delayed callbacks run immediately.
+
+        This speeds up the tests where the code under test has a 5s timeout.
+        """
+        def call_later(delay, callback, *args):
+            return self.loop.call_soon(callback, *args)
+
+        patcher = mock.patch.object(self.loop, 'call_later', call_later)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def setup_spead(self) -> None:
         def add_udp_reader(stream, host: str, port: int, *args, **kwargs) -> None:
             queue = self.inproc_queues[Endpoint(host, port)]
