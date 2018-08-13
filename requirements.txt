@@ -24,6 +24,6 @@ spead2
 terminaltables
 toolz
 
-git+ssh://git@github.com/ska-sa/katdal@python3#egg=katdal
+git+ssh://git@github.com/ska-sa/katdal#egg=katdal
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
