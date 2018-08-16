@@ -135,6 +135,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
             fill_value: Any, dtype: Any) -> None:
         super().__init__(name, in_chunks, out_chunks, fill_value, dtype)
         self.chunk_store = chunk_store
+        self.chunk_store.create_array(self.name)
         self.sensors = sensors
 
     def output(self, offset: Offset, value: np.ndarray) -> None:
