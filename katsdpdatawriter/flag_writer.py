@@ -120,9 +120,10 @@ class FlagWriterServer(DeviceServer):
         return "{}_{}".format(capture_block_id, self._flags_name)
 
     def rechunker_group(self, cbid: str) -> Optional[RechunkerGroup]:
+        extra = dict(capture_block_id=cbid)
         if not self._get_capture_block_state(cbid):
             logger.error("Received flags for CBID %s outside of init/done. "
-                         "These flags will be *discarded*.", cbid)
+                         "These flags will be *discarded*.", cbid, extra=extra)
             return None
 
         if cbid not in self._flag_streams:
@@ -158,7 +159,8 @@ class FlagWriterServer(DeviceServer):
         """Inform other users of the on disk data that we are finished with a
         particular capture_block_id.
         """
-        logger.info("Capture block %s flag capture complete.", capture_block_id)
+        extra = dict(capture_block_id=capture_block_id)
+        logger.info("Capture block %s flag capture complete.", capture_block_id, extra=extra)
         touch_file = os.path.join(self._chunk_store.path,
                                   self._get_capture_stream_name(capture_block_id),
                                   "complete")
@@ -169,9 +171,10 @@ class FlagWriterServer(DeviceServer):
 
     def _write_telstate_meta(self, capture_block_id: str) -> None:
         """Write out chunk information for the specified CBID to telstate."""
+        extra = dict(capture_block_id=capture_block_id)
         if capture_block_id not in self._flag_streams:
             logger.warning("No flag data received for cbid %s. Flag stream will not be usable.",
-                           capture_block_id)
+                           capture_block_id, extra=extra)
             return
         rechunker_group = self._flag_streams[capture_block_id]
         rechunker_group.close()
@@ -179,7 +182,7 @@ class FlagWriterServer(DeviceServer):
         capture_stream_name = self._get_capture_stream_name(capture_block_id)
         telstate_capture = self._telstate.view(capture_stream_name)
         telstate_capture.add('chunk_info', chunk_info, immutable=True)
-        logger.info("Written chunk information to telstate.")
+        logger.info("Written chunk information to telstate.", extra=extra)
 
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:
         """Mark specified capture_block_id as complete and flush flag cache.
