@@ -69,17 +69,15 @@ def _split_chunks_1d(in_chunks: Chunks1D, out_chunks: Chunks1D) -> Dict[int, Sli
         raise ValueError('chunks imply different shapes')
     offset = 0
     for c in in_chunks:
-        pos2 = pos
         slices = []
         cur = 0
         while cur < c:
-            oc = out_chunks[pos2]
-            pos2 += 1
+            oc = out_chunks[pos]
+            pos += 1
             slices.append(slice(cur, cur + oc))
             cur += oc
         if cur > c:
             raise ValueError('input and output chunks do not align')
-        pos = pos2
         out[offset] = tuple(slices)
         offset += c
     return out
