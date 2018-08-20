@@ -108,9 +108,9 @@ class Rechunker:
     chunks can arrive in any order.
 
     Memory usage depends on whether accumulation-in-time is being done. If
-    so, it data internally (enough for one complete output dump). If not,
-    there is no internal data storage, and memory usage only scales with the
-    metadata (number of chunks etc).
+    so, it stores data internally (enough for one complete output dump). If
+    not, there is no internal data storage, and memory usage only scales with
+    the metadata (number of chunks etc).
 
     Do not instantiate this class directly. Instead, subclass it and implement
     :meth:`output`.

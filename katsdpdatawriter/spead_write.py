@@ -153,7 +153,11 @@ class RechunkerGroup:
 
     The arrays need not all have the same shape. However, there must be a
     prefix of the axes on which they all have the same chunking scheme, and
-    on the remaining axes there can only be a single chunk.
+    on the remaining axes there can only be a single chunk. For example, the
+    following chunking schemes could co-exist in a group.
+    - ((2, 2), (3, 3, 3))
+    - ((2, 2), (3, 3, 3), (4,), (3,))
+    - ((2, 2), (3, 3, 3), (6,))
 
     Parameters
     ----------
