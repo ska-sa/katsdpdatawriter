@@ -1,7 +1,7 @@
 """Capture L0 visibilities from a SPEAD stream and write to a local chunk store.
 
-This process lives across multiple observations and hence multiple data sets.
-It writes weights and flags as well.
+This process lives across multiple capture blocks. It writes weights and flags
+as well.
 
 The status sensor has the following states (with typical transition events):
 
@@ -168,7 +168,7 @@ class VisibilityWriterServer(DeviceServer):
     async def request_capture_init(self, ctx, capture_block_id: str = None) -> None:
         """Start listening for L0 data"""
         if self._capture_task is not None:
-            logger.info("Ignoring capture_init because already capturing")
+            logger.info("Ignoring capture_init: already capturing")
             raise FailReply('Already capturing')
         self.sensors['status'].value = Status.WAIT_DATA
         self.sensors['device-status'].value = spead_write.DeviceStatus.OK
@@ -209,7 +209,7 @@ class VisibilityWriterServer(DeviceServer):
     async def request_capture_done(self, ctx) -> None:
         """Stop capturing, which cleans up the capturing task."""
         if self._capture_task is None:
-            logger.info("Ignoring capture_done because already explicitly stopped")
+            logger.info("Ignoring capture_done: already explicitly stopped")
             raise FailReply('Not capturing')
         await self.capture_done()
 

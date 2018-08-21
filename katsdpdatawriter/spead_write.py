@@ -75,7 +75,7 @@ def io_sensors() -> Sequence[Sensor]:
             "Number of chunks written to chunk store in this session. (prometheus: counter)"),
         Sensor(
             float, "output-seconds-total",
-            "Accumulated time spent writing flag dumps. (prometheus: counter)",
+            "Accumulated time spent writing chunks. (prometheus: counter)",
             "s")
     ]
 

@@ -185,7 +185,9 @@ class FlagWriterServer(DeviceServer):
         logger.info("Written chunk information to telstate.", extra=extra)
 
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:
-        """Mark specified capture_block_id as complete and flush flag cache.
+        """Mark specified capture_block_id as complete.
+
+        It flushes the flag cache and writes chunk info into telstate.
         """
         if capture_block_id not in self._capture_block_state:
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))

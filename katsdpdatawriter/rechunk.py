@@ -97,7 +97,7 @@ class Rechunker:
 
     This is similar in concept to dask's rechunk, but in a streaming fashion
     (with the assumption that time is on the first axis). It is more limited
-    through: non-time axes can only be split, not re-combined. The time axis
+    though: non-time axes can only be split, not re-combined. The time axis
     must be size-1 chunks on input, but can be larger on output (accumulation
     in time).
 
@@ -225,8 +225,8 @@ class Rechunker:
         Parameters
         ----------
         offset : tuple of int
-            Start coordinates of the chunk. It must be aligned to be configured
-            chunking scheme.
+            Start coordinates of the chunk. It must be aligned to the
+            configured chunking scheme.
         values : array-like
             Values of the chunk.
 

@@ -23,5 +23,5 @@ MAINTAINER Bruce Merry "bmerry@ska.ac.za"
 COPY --from=build --chown=kat:kat /home/kat/ve3 /home/kat/ve3
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
-EXPOSE 2046
-EXPOSE 2052
+EXPOSE 2046    # katcp for vis_writer
+EXPOSE 2052    # katcp for flag_writer
