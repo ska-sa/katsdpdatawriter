@@ -57,6 +57,10 @@ def io_sensors() -> Sequence[Sensor]:
             "Number of heaps dropped due to being incomplete. (prometheus: counter)",
             status_func=_warn_if_positive),
         Sensor(
+            int, "input-too-old-heaps-total",
+            "Number of heaps dropped because they are too late. (prometheus: counter)",
+            status_func=_warn_if_positive),
+        Sensor(
             int, "input-bytes-total",
             "Number of payload bytes received in this session. (prometheus: counter)",
             "B"),
@@ -91,6 +95,7 @@ def clear_io_sensors(sensors: SensorSet) -> None:
     """Zero the input and output counters in a sensor set"""
     now = time.time()
     for name in ['input-incomplete-heaps-total',
+                 'input-too-old-heaps-total',
                  'input-bytes-total',
                  'input-heaps-total',
                  'input-dumps-total',
@@ -146,6 +151,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         self.sensors['output-chunks-total'].value += 1
         self.sensors['output-bytes-total'].value += value.nbytes
         self.sensors['output-seconds-total'].value += end - start
+
+    def out_of_order(self, received: int, seen: int) -> None:
+        self.sensors['input-too-old-heaps-total'].value += 1
 
 
 class RechunkerGroup:
