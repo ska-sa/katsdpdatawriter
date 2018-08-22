@@ -172,7 +172,6 @@ class FlagWriterServer(DeviceServer):
                            capture_block_id, extra=extra)
             return
         rechunker_group = self._flag_streams[capture_block_id]
-        rechunker_group.close()
         chunk_info = rechunker_group.get_chunk_info()
         capture_stream_name = self._get_capture_stream_name(capture_block_id)
         telstate_capture = self._telstate.view(capture_stream_name)

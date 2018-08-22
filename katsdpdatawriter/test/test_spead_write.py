@@ -72,7 +72,7 @@ class TestRechunkerGroup:
         for i in range(0, 8, 4):
             for j in range(2):
                 self.add_chunks((j, i))
-        self.r.close()
+        chunk_info = self.r.get_chunk_info()
 
         expected_calls = []
         for i in range(0, 8, 4):
@@ -94,7 +94,7 @@ class TestRechunkerGroup:
                 np.testing.assert_array_equal(self.weights_channel[slices], value)
 
         assert_equal(
-            self.r.get_chunk_info(),
+            chunk_info,
             {
                 'weights': {
                     'prefix': 'prefix',

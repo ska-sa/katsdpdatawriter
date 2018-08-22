@@ -206,16 +206,14 @@ class RechunkerGroup:
             offset = offset_prefix + (0,) * (value.ndim - len(offset_prefix))
             rechunker.add(offset, value)
 
-    def close(self) -> None:
-        """Flush any buffered data to the chunk store."""
-        for rechunker in self._rechunkers:
-            rechunker.close()
-
     def get_chunk_info(self) -> Dict[str, Dict[str, Any]]:
         """Get the chunk information to place into telstate to describe the arrays.
 
-        This must only be called after :meth:`close`, to get the correct shape.
+        This closes the rechunkers (flushing partial output chunks), so no
+        further calls to :meth:`add` should be made.
         """
+        for rechunker in self._rechunkers:
+            rechunker.close()
         return {array.name: rechunker.get_chunk_info(self.prefix)
                 for array, rechunker in zip(self.arrays, self._rechunkers)}
 
