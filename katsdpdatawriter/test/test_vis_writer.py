@@ -2,12 +2,13 @@
 
 import tempfile
 import shutil
+import os.path
 
 import numpy as np
 import katdal.chunkstore_npy
 import spead2.send.asyncio
 from aiokatcp import FailReply
-from nose.tools import assert_raises_regex
+from nose.tools import assert_raises_regex, assert_true
 
 from ..vis_writer import VisibilityWriterServer, Status
 from .test_writer import BaseTestWriterServer
@@ -89,6 +90,8 @@ class TestVisWriterServer(BaseTestWriterServer):
         self.assert_sensor_equals('status', Status.COMPLETE)
         await self.client.request('capture-done')
         self.assert_sensor_equals('status', Status.IDLE)
+        assert_true(os.path.exists(
+            os.path.join(self.chunk_store.path, cbid + '_sdp_l0', 'complete')))
 
     async def test_missing_stop_item(self) -> None:
         cbid = '1234567890'

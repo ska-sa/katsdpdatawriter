@@ -5,6 +5,7 @@ Receive heaps from a SPEAD stream and write corresponding data to a chunk store.
 import time
 import enum
 import logging
+import os
 from typing import Optional, Any, Sequence, Iterable, Dict
 
 import numpy as np
@@ -303,6 +304,13 @@ class SpeadWriter:
         This must be implemented in derived classes.
         """
         raise NotImplementedError    # pragma: no cover
+
+    def write_complete_marker(self, chunk_store: katdal.chunkstore.ChunkStore,
+                              capture_stream_name: str) -> None:
+        touch_file = os.path.join(chunk_store.path, capture_stream_name, "complete")
+        os.makedirs(os.path.dirname(touch_file), exist_ok=True)
+        with open(touch_file, 'a'):
+            os.utime(touch_file, None)
 
 
 def chunks_from_telstate(telstate):

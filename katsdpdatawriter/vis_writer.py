@@ -35,7 +35,6 @@ The following useful object parameters are stored in telstate:
   - <capture_stream>_chunk_info: {prefix, dtype, shape, chunks} dict per array
 """
 
-import os
 import asyncio
 import logging
 import enum
@@ -151,12 +150,7 @@ class VisibilityWriterServer(DeviceServer):
             self.sensors['status'].value = Status.FINALISING
             view = self._telstate_l0.view(capture_stream_name)
             view.add('chunk_info', rechunker_group.get_chunk_info())
-            os.sync()
-            touch_file = os.path.join(self._chunk_store.path, capture_stream_name,
-                                      'complete')
-            os.makedirs(os.path.dirname(touch_file), exist_ok=True)
-            with open(touch_file, 'a'):
-                os.utime(touch_file, None)
+            writer.write_complete_marker(self._chunk_store, capture_stream_name)
             self.sensors['status'].value = Status.COMPLETE
         except Exception:
             logger.exception('Exception in capture task')
