@@ -160,8 +160,7 @@ class FlagWriterServer(DeviceServer):
         """
         extra = dict(capture_block_id=capture_block_id)
         logger.info("Capture block %s flag capture complete.", capture_block_id, extra=extra)
-        self._writer.write_complete_marker(self._chunk_store,
-                                           self._get_capture_stream_name(capture_block_id))
+        self._chunk_store.mark_complete(self._get_capture_stream_name(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.COMPLETE)
 
     def _write_telstate_meta(self, capture_block_id: str) -> None:

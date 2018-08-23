@@ -150,7 +150,7 @@ class VisibilityWriterServer(DeviceServer):
             self.sensors['status'].value = Status.FINALISING
             view = self._telstate_l0.view(capture_stream_name)
             view.add('chunk_info', rechunker_group.get_chunk_info())
-            writer.write_complete_marker(self._chunk_store, capture_stream_name)
+            self._chunk_store.mark_complete(capture_stream_name)
             self.sensors['status'].value = Status.COMPLETE
         except Exception:
             logger.exception('Exception in capture task')
