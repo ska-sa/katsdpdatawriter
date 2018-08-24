@@ -5,7 +5,6 @@ Receive heaps from a SPEAD stream and write corresponding data to a chunk store.
 import time
 import enum
 import logging
-import os
 from typing import Optional, Any, Sequence, Iterable, Dict
 
 import numpy as np
