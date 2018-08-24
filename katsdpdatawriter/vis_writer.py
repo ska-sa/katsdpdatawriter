@@ -183,8 +183,8 @@ class VisibilityWriterServer(DeviceServer):
         capture_task = self._capture_task
         # Give it a chance to stop on its own from stop packets
         try:
-            logger.info('Waiting for capture task (5s timeut')
-            await asyncio.wait_for(capture_task, timeout=5)
+            logger.info('Waiting for capture task (5s timeout)')
+            await asyncio.wait_for(asyncio.shield(capture_task), timeout=5)
         except asyncio.TimeoutError:
             if self._capture_task is not capture_task:
                 return     # Someone else beat us to the cleanup
