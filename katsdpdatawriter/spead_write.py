@@ -195,7 +195,12 @@ class ChunkStoreRechunker(rechunk.Rechunker):
 
         This should be called *after* :meth:`close`.
         """
-        await asyncio.gather(*self._futures)
+        # asyncio.wait is implemented by adding a done callback to each
+        # future. Done callbacks are run in order of addition, so when
+        # wait returns, we are guaranteed that the done callbacks have
+        # run.
+        if self._futures:
+            await asyncio.wait(self._futures)
 
 
 class RechunkerGroup:
