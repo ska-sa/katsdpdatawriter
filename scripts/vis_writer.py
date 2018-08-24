@@ -93,6 +93,4 @@ if __name__ == '__main__':
             loop.run_until_complete(run(loop, server))
     else:
         loop.run_until_complete(run(loop, server))
-
-    loop.run_until_complete()
     loop.close()
