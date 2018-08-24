@@ -52,6 +52,7 @@ import spead2.recv.asyncio
 
 import katsdpdatawriter
 from . import spead_write
+from .bounded_executor import BoundedThreadPoolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class VisibilityWriter(spead_write.SpeadWriter):
     def first_heap(self) -> None:
         self.sensors['status'].value = Status.CAPTURING
 
-    def rechunker_group(self, updated: Dict) -> spead_write.RechunkerGroup:
+    def rechunker_group(self, updated: Dict[str, spead2.Item]) -> spead_write.RechunkerGroup:
         return self._rechunker_group
 
 
@@ -106,7 +107,8 @@ class VisibilityWriterServer(DeviceServer):
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
                  endpoints: List[Endpoint], interface: Optional[str], ibv: bool,
                  chunk_store: katdal.chunkstore.ChunkStore, chunk_size: float,
-                 telstate_l0: katsdptelstate.TelescopeState, stream_name: str) -> None:
+                 telstate_l0: katsdptelstate.TelescopeState, stream_name: str,
+                 max_workers: int) -> None:
         super().__init__(host, port, loop=loop)
         self._endpoints = endpoints
         self._interface_address = katsdpservices.get_interface_address(interface)
@@ -115,6 +117,7 @@ class VisibilityWriterServer(DeviceServer):
         self._stream_name = stream_name
         self._telstate_l0 = telstate_l0
         self._rx = None    # type: Optional[spead2.recv.asyncio.Stream]
+        self._max_workers = max_workers
 
         in_chunks = spead_write.chunks_from_telstate(telstate_l0)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
@@ -138,10 +141,12 @@ class VisibilityWriterServer(DeviceServer):
     async def _do_capture(self, capture_stream_name: str, rx: spead2.recv.asyncio.Stream) -> None:
         """Capture data for a single capture block"""
         writer = None
+        rechunker_group = None
+        executor = BoundedThreadPoolExecutor(self._max_workers)
         try:
             spead_write.clear_io_sensors(self.sensors)
             rechunker_group = spead_write.RechunkerGroup(
-                self._chunk_store, self.sensors, capture_stream_name, self._arrays)
+                executor, self._chunk_store, self.sensors, capture_stream_name, self._arrays)
             writer = VisibilityWriter(self.sensors, rx, rechunker_group)
             self.sensors['status'].value = Status.WAIT_DATA
 
@@ -149,7 +154,8 @@ class VisibilityWriterServer(DeviceServer):
 
             self.sensors['status'].value = Status.FINALISING
             view = self._telstate_l0.view(capture_stream_name)
-            view.add('chunk_info', rechunker_group.get_chunk_info())
+            view.add('chunk_info', await rechunker_group.get_chunk_info())
+            rechunker_group = None   # Tells except block not to clean up
             self._chunk_store.mark_complete(capture_stream_name)
             self.sensors['status'].value = Status.COMPLETE
         except Exception:
@@ -158,6 +164,11 @@ class VisibilityWriterServer(DeviceServer):
             self.sensors['device-status'].value = spead_write.DeviceStatus.FAIL
         finally:
             spead_write.clear_io_sensors(self.sensors)
+            if rechunker_group is not None:
+                # Has the side effect of doing cleanup
+                await rechunker_group.get_chunk_info()
+            # Shouldn't be any pending tasks, because get_chunk_info should wait
+            executor.shutdown()
 
     async def request_capture_init(self, ctx, capture_block_id: str = None) -> None:
         """Start listening for L0 data"""

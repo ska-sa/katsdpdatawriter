@@ -18,6 +18,7 @@ from katsdptelstate.endpoint import Endpoint
 import katsdpdatawriter
 from . import spead_write
 from .spead_write import RechunkerGroup, Array
+from .bounded_executor import BoundedThreadPoolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ class FlagWriterServer(DeviceServer):
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
                  endpoints: List[Endpoint], flag_interface: Optional[str],
                  flags_ibv: bool, chunk_store: katdal.chunkstore.ChunkStore,
-                 telstate: katsdptelstate.TelescopeState, flags_name: str) -> None:
+                 telstate: katsdptelstate.TelescopeState, flags_name: str,
+                 max_workers: int) -> None:
         super().__init__(host, port, loop=loop)
 
         self._chunk_store = chunk_store
@@ -81,6 +83,7 @@ class FlagWriterServer(DeviceServer):
         self._flags_name = flags_name
         # rechunker group for each CBID
         self._flag_streams = {}          # type: Dict[str, RechunkerGroup]
+        self._executor = BoundedThreadPoolExecutor(max_workers=max_workers)
 
         self.sensors.add(Sensor(
             Status, "status", "The current status of the flag writer process."))
@@ -128,7 +131,7 @@ class FlagWriterServer(DeviceServer):
         if cbid not in self._flag_streams:
             prefix = self._get_capture_stream_name(cbid)
             self._flag_streams[cbid] = RechunkerGroup(
-                self._chunk_store, self._writer.sensors, prefix, self._arrays)
+                self._executor, self._chunk_store, self._writer.sensors, prefix, self._arrays)
         return self._flag_streams[cbid]
 
     async def _do_capture(self) -> None:
@@ -147,6 +150,7 @@ class FlagWriterServer(DeviceServer):
         finally:
             spead_write.clear_io_sensors(self.sensors)
             self.sensors['status'].value = Status.FINISHED
+            self._executor.shutdown()
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start an observation"""
@@ -163,7 +167,7 @@ class FlagWriterServer(DeviceServer):
         self._chunk_store.mark_complete(self._get_capture_stream_name(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.COMPLETE)
 
-    def _write_telstate_meta(self, capture_block_id: str) -> None:
+    async def _write_telstate_meta(self, capture_block_id: str) -> None:
         """Write out chunk information for the specified CBID to telstate."""
         extra = dict(capture_block_id=capture_block_id)
         if capture_block_id not in self._flag_streams:
@@ -171,7 +175,7 @@ class FlagWriterServer(DeviceServer):
                            capture_block_id, extra=extra)
             return
         rechunker_group = self._flag_streams[capture_block_id]
-        chunk_info = rechunker_group.get_chunk_info()
+        chunk_info = await rechunker_group.get_chunk_info()
         capture_stream_name = self._get_capture_stream_name(capture_block_id)
         telstate_capture = self._telstate.view(capture_stream_name)
         telstate_capture.add('chunk_info', chunk_info, immutable=True)
@@ -186,7 +190,7 @@ class FlagWriterServer(DeviceServer):
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
         # Allow some time for stragglers to appear
         await asyncio.sleep(5, loop=self.loop)
-        self._write_telstate_meta(capture_block_id)
+        await self._write_telstate_meta(capture_block_id)
         self._mark_cbid_complete(capture_block_id)
 
     async def stop(self, cancel: bool = True) -> None:

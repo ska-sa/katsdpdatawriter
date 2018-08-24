@@ -55,6 +55,8 @@ if __name__ == '__main__':
                         help='name for the flags stream. [default=%(default)s]', metavar='NAME')
     parser.add_argument('--flags-ibv', action='store_true',
                         help='Use ibverbs acceleration to receive flags')
+    parser.add_argument('--workers', type=int, default=50,
+                        help='Threads to use for writing chunks')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
                         help='Disable aiomonitor debugging server')
     parser.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
@@ -79,7 +81,7 @@ if __name__ == '__main__':
     chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(args.npy_path)
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.flags_ibv, chunk_store,
-                              args.telstate, args.flags_name)
+                              args.telstate, args.flags_name, args.workers)
 
     if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop,

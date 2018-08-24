@@ -2,15 +2,16 @@
 
 import tempfile
 import shutil
-import os.path
+from unittest import mock
 
 import numpy as np
 import katdal.chunkstore_npy
 import spead2.send.asyncio
-from aiokatcp import FailReply
-from nose.tools import assert_raises_regex, assert_true
+from aiokatcp import FailReply, Sensor
+from nose.tools import assert_raises_regex, assert_true, assert_in
 
 from ..vis_writer import VisibilityWriterServer, Status
+from ..spead_write import DeviceStatus
 from .test_writer import BaseTestWriterServer
 
 
@@ -19,7 +20,8 @@ class TestVisWriterServer(BaseTestWriterServer):
         server = VisibilityWriterServer(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
             interface='lo', ibv=False, chunk_store=self.chunk_store, chunk_size=10000,
-            telstate_l0=self.telstate, stream_name='sdp_l0')
+            telstate_l0=self.telstate, stream_name='sdp_l0',
+            max_workers=4)
         await server.start()
         self.addCleanup(server.stop)
         return server
@@ -87,11 +89,23 @@ class TestVisWriterServer(BaseTestWriterServer):
         self.assert_sensor_equals('input-heaps-total', 1)
         for tx in self.tx:
             await self.send_heap(tx, self.ig.get_end())
-        self.assert_sensor_equals('status', Status.COMPLETE)
+        # The writes to chunkstore happen in other threads, so the state here
+        # depends on timing.
+        assert_in(self.server.sensors['status'].value, {Status.FINALISING, Status.COMPLETE})
         await self.client.request('capture-done')
         self.assert_sensor_equals('status', Status.IDLE)
-        assert_true(os.path.exists(
-            os.path.join(self.chunk_store.path, cbid + '_sdp_l0', 'complete')))
+        assert_true(self.chunk_store.is_complete(cbid + '_sdp_l0'))
+
+    async def test_failed_write(self) -> None:
+        cbid = '1234567890'
+        with mock.patch.object(katdal.chunkstore_npy.NpyFileChunkStore, 'put_chunk',
+                               side_effect=katdal.chunkstore.StoreUnavailable):
+            await self.client.request('capture-init', cbid)
+            for tx in self.tx:
+                await self.send_heap(tx, self.ig.get_start())
+            await self.send_heap(self.tx[0], self.ig.get_heap())
+            await self.client.request('capture-done')
+        self.assert_sensor_equals('device-status', DeviceStatus.FAIL, {Sensor.Status.ERROR})
 
     async def test_missing_stop_item(self) -> None:
         cbid = '1234567890'

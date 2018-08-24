@@ -5,7 +5,9 @@ Receive heaps from a SPEAD stream and write corresponding data to a chunk store.
 import time
 import enum
 import logging
-from typing import Optional, Any, Sequence, Iterable, Dict
+import concurrent.futures
+import asyncio
+from typing import Optional, Any, Sequence, Iterable, Set, Dict, Tuple   # noqa: F401
 
 import numpy as np
 import attr
@@ -130,30 +132,70 @@ class Array:
 
 
 class ChunkStoreRechunker(rechunk.Rechunker):
-    """Rechunker that outputs data to a chunk store.
+    """Rechunker that outputs data to a chunk store via an executor.
 
     The name is used as the array name in the chunk store.
     """
     def __init__(
-            self, chunk_store: Any, sensors: SensorSet, name: str,
+            self,
+            executor: concurrent.futures.Executor,
+            chunk_store: katdal.chunkstore.ChunkStore,
+            sensors: SensorSet, name: str,
             in_chunks: Chunks, out_chunks: Chunks,
             fill_value: Any, dtype: Any) -> None:
         super().__init__(name, in_chunks, out_chunks, fill_value, dtype)
+        self.executor = executor
         self.chunk_store = chunk_store
         self.chunk_store.create_array(self.name)
         self.sensors = sensors
+        self._futures = set()    # type: Set[asyncio.Future[Tuple[int, float]]]
 
-    def output(self, offset: Offset, value: np.ndarray) -> None:
+    def _put_chunk(self, slices: Tuple[slice, ...], value: np.ndarray) -> Tuple[int, float]:
+        """Put a chunk into the chunk store and return statistics.
+
+        This is run in a separate thread, using an executor.
+        """
         start = time.monotonic()
-        slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
         self.chunk_store.put_chunk(self.name, slices, value)
         end = time.monotonic()
-        self.sensors['output-chunks-total'].value += 1
-        self.sensors['output-bytes-total'].value += value.nbytes
-        self.sensors['output-seconds-total'].value += end - start
+        return value.nbytes, end - start
+
+    def _update_stats(self, future: 'asyncio.Future[Tuple[int, float]]') -> None:
+        """Done callback for a future running :meth:`_put_chunk`.
+
+        This is run on the event loop, so can safely update sensors. It also
+        logs any errors.
+        """
+        self._futures.remove(future)
+        try:
+            nbytes, elapsed = future.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception('Failed to write a chunk to %s', self.name)
+            self.sensors['device-status'].value = DeviceStatus.FAIL
+        else:
+            self.sensors['output-chunks-total'].value += 1
+            self.sensors['output-bytes-total'].value += nbytes
+            self.sensors['output-seconds-total'].value += elapsed
+
+    def output(self, offset: Offset, value: np.ndarray) -> None:
+        slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
+        loop = asyncio.get_event_loop()
+        future = asyncio.ensure_future(
+            loop.run_in_executor(self.executor, self._put_chunk, slices, value))
+        self._futures.add(future)
+        future.add_done_callback(self._update_stats)
 
     def out_of_order(self, received: int, seen: int) -> None:
         self.sensors['input-too-old-heaps-total'].value += 1
+
+    async def wait(self) -> None:
+        """Wait for all asynchronous writes to complete.
+
+        This should be called *after* :meth:`close`.
+        """
+        await asyncio.gather(*self._futures)
 
 
 class RechunkerGroup:
@@ -169,6 +211,8 @@ class RechunkerGroup:
 
     Parameters
     ----------
+    executor
+        Executor used for asynchronous writes to the chunk store.
     chunk_store
         Chunk-store into which output chunks are written.
     sensors
@@ -180,14 +224,17 @@ class RechunkerGroup:
     arrays
         Descriptions of the incoming arrays.
     """
-    def __init__(self, chunk_store: katdal.chunkstore.ChunkStore,
+    def __init__(self,
+                 executor: concurrent.futures.Executor,
+                 chunk_store: katdal.chunkstore.ChunkStore,
                  sensors: SensorSet, prefix: str,
                  arrays: Sequence[Array]) -> None:
         self.prefix = prefix
         self.arrays = list(arrays)
         self.sensors = sensors
         self._rechunkers = [
-            ChunkStoreRechunker(chunk_store, sensors, chunk_store.join(prefix, a.name),
+            ChunkStoreRechunker(executor, chunk_store, sensors,
+                                chunk_store.join(prefix, a.name),
                                 a.in_chunks, a.out_chunks,
                                 a.fill_value, a.dtype) for a in arrays]
 
@@ -205,7 +252,7 @@ class RechunkerGroup:
             offset = offset_prefix + (0,) * (value.ndim - len(offset_prefix))
             rechunker.add(offset, value)
 
-    def get_chunk_info(self) -> Dict[str, Dict[str, Any]]:
+    async def get_chunk_info(self) -> Dict[str, Dict[str, Any]]:
         """Get the chunk information to place into telstate to describe the arrays.
 
         This closes the rechunkers (flushing partial output chunks), so no
@@ -213,6 +260,8 @@ class RechunkerGroup:
         """
         for rechunker in self._rechunkers:
             rechunker.close()
+        for rechunker in self._rechunkers:
+            await rechunker.wait()
         return {array.name: rechunker.get_chunk_info(self.prefix)
                 for array, rechunker in zip(self.arrays, self._rechunkers)}
 

@@ -1,19 +1,22 @@
 """Tests for :mod:`katsdpdatawriter.flag_writer`."""
 
-import os.path
 import tempfile
 import shutil
+from unittest import mock
 
 import numpy as np
-from nose.tools import (assert_equal, assert_in, assert_true,
+from nose.tools import (assert_equal, assert_true,
                         assert_regex, assert_raises_regex, assert_logs)
 
 import aiokatcp
+from aiokatcp import Sensor
 import spead2
 import spead2.send.asyncio
+import katdal.chunkstore
 from katdal.chunkstore_npy import NpyFileChunkStore
 
 from ..flag_writer import FlagWriterServer, Status
+from ..spead_write import DeviceStatus
 from .test_writer import BaseTestWriterServer
 
 
@@ -22,7 +25,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
         server = FlagWriterServer(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
             flag_interface='lo', flags_ibv=False, chunk_store=self.chunk_store,
-            telstate=self.telstate, flags_name='sdp_l1_flags')
+            telstate=self.telstate, flags_name='sdp_l1_flags', max_workers=4)
         await server.start()
         self.addCleanup(server.stop)
         return server
@@ -65,8 +68,27 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.client = await self.setup_client(self.server)
         self.ig = self.setup_ig()
 
-    async def test_capture(self) -> None:
+    def _check_chunk_info(self) -> None:
         n_chans = self.telstate['n_chans']
+        n_chans_per_substream = self.telstate['n_chans_per_substream']
+        n_bls = self.telstate['n_bls']
+        capture_stream = self.cbid + '_sdp_l1_flags'
+
+        view = self.telstate.view(capture_stream)
+        chunk_info = view['chunk_info']
+        n_substreams = n_chans // n_chans_per_substream
+        assert_equal(
+            chunk_info,
+            {
+                'flags': {
+                    'prefix': capture_stream,
+                    'shape': (1, n_chans, n_bls),
+                    'chunks': ((1,), (n_chans_per_substream,) * n_substreams, (n_bls,)),
+                    'dtype': np.dtype(np.uint8)
+                }
+            })
+
+    async def test_capture(self) -> None:
         n_chans_per_substream = self.telstate['n_chans_per_substream']
         n_bls = self.telstate['n_bls']
         self.assert_sensor_equals('status', Status.WAIT_DATA)
@@ -83,27 +105,22 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.assert_sensor_equals('capture-block-state', '{}')
         await self.stop_server()
         capture_stream = self.cbid + '_sdp_l1_flags'
-        assert_true(os.path.exists(
-            os.path.join(self.npy_path, capture_stream, 'complete')))
+        assert_true(self.chunk_store.is_complete(capture_stream))
         chunk = self.chunk_store.get_chunk(
             self.chunk_store.join(capture_stream, 'flags'),
             np.s_[0:1, 0:n_chans_per_substream, 0:n_bls], np.uint8)
         np.testing.assert_array_equal(self.ig['flags'].value[np.newaxis], chunk)
 
-        view = self.telstate.view(capture_stream)
-        chunk_info = view['chunk_info']
-        n_substreams = n_chans // n_chans_per_substream
-        assert_equal(
-            chunk_info,
-            {
-                'flags': {
-                    'prefix': capture_stream,
-                    'shape': (1, n_chans, n_bls),
-                    'chunks': ((1,), (n_chans_per_substream,) * n_substreams, (n_bls,)),
-                    'dtype': np.dtype(np.uint8)
-                }
-            })
-        assert_in('chunk_info', view)
+        self._check_chunk_info()
+
+    async def test_failed_write(self) -> None:
+        with mock.patch.object(NpyFileChunkStore, 'put_chunk',
+                               side_effect=katdal.chunkstore.StoreUnavailable):
+            await self.client.request('capture-init', self.cbid)
+            await self.send_heap(self.tx[0], self.ig.get_heap())
+            await self.client.request('capture-done', self.cbid)
+        self._check_chunk_info()
+        self.assert_sensor_equals('device-status', DeviceStatus.FAIL, {Sensor.Status.ERROR})
 
     async def test_double_init(self) -> None:
         await self.client.request('capture-init', self.cbid)

@@ -196,6 +196,7 @@ class Rechunker:
             full_idx = np.index_exp[0:len(item.value)] + idx
             offset = tuple(s.start + offset for s, offset in zip(full_idx, item.offset))
             self.output(offset, item.value[full_idx])
+        item.value = None   # Allow GC to reclaim memory now
 
     def _get_item(self, offset: Offset) -> Optional[_Item]:
         """Get the item that should hold the input chunk starting at `offset`.
@@ -209,7 +210,6 @@ class Rechunker:
         if item is None or item.offset[0] < item_offset[0]:
             if item is not None:
                 self._flush(item)
-                item.value = None   # Allow GC to reclaim memory now
             shape = self._item_shape(offset)
             initial_value = np.full(shape, self.fill_value, self.dtype)
             item = self._Item(item_offset, initial_value)
@@ -221,6 +221,9 @@ class Rechunker:
 
     def add(self, offset: Offset, value: np.ndarray) -> None:
         """Add a new incoming chunk.
+
+        The `value` is guaranteed to be copied, so it is safe for the caller
+        to update it after the recall returns.
 
         Parameters
         ----------
@@ -247,7 +250,8 @@ class Rechunker:
                 item.add(offset, value)
         else:
             shape = self._item_shape(offset)
-            value = np.require(value, dtype=self.dtype)
+            # Ensure the dtype and force a copy at the same time
+            value = np.asarray(value).astype(self.dtype, copy=True)
             if value.shape != shape:
                 raise ValueError('value has wrong shape')
             item = self._Item(offset, value)
@@ -293,5 +297,9 @@ class Rechunker:
         }
 
     def output(self, offset: Offset, value: np.ndarray) -> None:
-        """Called with each output chunk."""
+        """Called with each output chunk.
+
+        It is safe for the callee to save a reference to `value`: it is
+        guaranteed that this class will not reuse the memory.
+        """
         raise NotImplementedError      # pragma: nocover

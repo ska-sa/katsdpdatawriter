@@ -52,6 +52,8 @@ if __name__ == '__main__':
                              'directly to object store')
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
+    parser.add_argument('--workers', type=int, default=50,
+                        help='Threads to use for writing chunks')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
                         help='Disable aiomonitor debugging server')
     parser.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
@@ -81,7 +83,7 @@ if __name__ == '__main__':
     server = VisibilityWriterServer(args.host, args.port, loop, args.l0_spead,
                                     args.l0_interface, args.l0_ibv,
                                     chunk_store, args.obj_size_mb * 1e6,
-                                    telstate_l0, args.l0_name)
+                                    telstate_l0, args.l0_name, args.workers)
 
     if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop,
