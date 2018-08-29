@@ -3,12 +3,10 @@
 import asyncio
 import signal
 import logging
-import os
 
 import aiomonitor
 import katsdpservices
 import katsdptelstate
-from katdal.chunkstore_npy import NpyFileChunkStore
 
 from katsdpdatawriter.vis_writer import VisibilityWriterServer
 from katsdpdatawriter.spead_write import add_chunk_store_args, chunk_store_from_args

@@ -126,6 +126,7 @@ class TestRechunkerGroup(asynctest.TestCase):
 class BadArguments(Exception):
     """Exception used in mock when replacing ArgumentParser.Error"""
 
+
 @mock.patch.object(argparse.ArgumentParser, 'error', side_effect=BadArguments)
 class TestChunkStoreFromArgs:
     def setup(self) -> None:
@@ -149,13 +150,13 @@ class TestChunkStoreFromArgs:
 
     def test_npy(self, error):
         with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
-            chunk_store = chunk_store_from_args(self.parser, self.parser.parse_args(
+            chunk_store_from_args(self.parser, self.parser.parse_args(
                 ['--npy-path=/']))
         m.assert_called_with('/')
 
     def test_s3(self, error):
         with mock.patch('katdal.chunkstore_s3.S3ChunkStore.from_url') as m:
-            chunk_store = chunk_store_from_args(self.parser, self.parser.parse_args(
+            chunk_store_from_args(self.parser, self.parser.parse_args(
                 ['--s3-endpoint-url=https://s3.invalid',
                  '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS']))
         m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'))

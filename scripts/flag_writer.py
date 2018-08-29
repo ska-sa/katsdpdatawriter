@@ -8,7 +8,6 @@ picked up by katdal.
 
 """
 
-import os
 import logging
 import signal
 import asyncio
@@ -42,7 +41,7 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    spead_write.add_chunk_store_args(parser)
+    add_chunk_store_args(parser)
     parser.add_argument('--flags-spead', default=':7202', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7202),
                         help='Source port/multicast groups for flags SPEAD streams. '
@@ -73,7 +72,7 @@ if __name__ == '__main__':
     if args.flags_ibv and args.flags_interface is None:
         parser.error("--flags-ibv requires --flags-interface")
 
-    chunk_store = spead_write.chunk_store_from_args(parser, args)
+    chunk_store = chunk_store_from_args(parser, args)
     loop = asyncio.get_event_loop()
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.flags_ibv, chunk_store,
