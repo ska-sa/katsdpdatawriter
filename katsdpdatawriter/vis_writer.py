@@ -210,6 +210,7 @@ class VisibilityWriterServer(DeviceServer):
             self._rx.stop()
         self._capture_task = None
         self.sensors['status'].value = Status.IDLE
+        logger.info('Capture complete')
 
     async def request_capture_done(self, ctx) -> None:
         """Stop capturing, which cleans up the capturing task."""
