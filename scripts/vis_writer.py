@@ -11,6 +11,7 @@ import katsdptelstate
 from katdal.chunkstore_npy import NpyFileChunkStore
 
 from katsdpdatawriter.vis_writer import VisibilityWriterServer
+from katsdpdatawriter.spead_write import add_chunk_store_args, chunk_store_from_args
 
 
 def on_shutdown(loop: asyncio.AbstractEventLoop, server: VisibilityWriterServer) -> None:
@@ -34,6 +35,7 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
+    add_chunk_store_args(parser)
     parser.add_argument('--l0-spead', default=':7200', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7200),
                         help='Source port/multicast groups for L0 SPEAD stream. '
@@ -45,11 +47,6 @@ if __name__ == '__main__':
                         help='Name of L0 stream from ingest [default=%(default)s]')
     parser.add_argument('--l0-ibv', action='store_true',
                         help='Use ibverbs acceleration to receive L0 stream [default=no]')
-    parser.add_argument('--s3-endpoint-url',
-                        help='URL of S3 gateway to Ceph cluster')
-    parser.add_argument('--npy-path',
-                        help='Write NPY files to this directory instead of '
-                             'directly to object store')
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('--workers', type=int, default=50,
@@ -66,15 +63,12 @@ if __name__ == '__main__':
                         help='KATCP host address [default=all hosts]')
     parser.set_defaults(telstate='localhost')
     args = parser.parse_args()
-    if not args.npy_path:
-        parser.error('--npy-path is required')
-    if not os.path.isdir(args.npy_path):
-        parser.error("Specified NPY path, %s, does not exist.", args.npy_path)
+
     if args.l0_ibv and args.l0_interface is None:
         parser.error('--l0-ibv requires --l0-interface')
 
     # Connect to object store and save config in telstate
-    chunk_store = NpyFileChunkStore(args.npy_path)
+    chunk_store = chunk_store_from_args(parser, args)
     telstate_l0 = args.telstate.view(args.l0_name)
     if args.s3_endpoint_url:
         telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)

@@ -1,12 +1,14 @@
+import argparse
 from unittest import mock
 
 import numpy as np
-from nose.tools import assert_equal, assert_count_equal, assert_is_instance
+from nose.tools import assert_equal, assert_count_equal, assert_is_instance, assert_raises
 import asynctest
 from aiokatcp import SensorSet
 from katdal.chunkstore import ChunkStore
 
-from ..spead_write import Array, RechunkerGroup, io_sensors
+from ..spead_write import (Array, RechunkerGroup, io_sensors,
+                           add_chunk_store_args, chunk_store_from_args)
 from ..rechunk import Offset
 from ..bounded_executor import BoundedThreadPoolExecutor
 
@@ -119,3 +121,41 @@ class TestRechunkerGroup(asynctest.TestCase):
 
 
 # SpeadWriter gets exercised via its derived classes
+
+
+class BadArguments(Exception):
+    """Exception used in mock when replacing ArgumentParser.Error"""
+
+@mock.patch.object(argparse.ArgumentParser, 'error', side_effect=BadArguments)
+class TestChunkStoreFromArgs:
+    def setup(self) -> None:
+        self.parser = argparse.ArgumentParser()
+        add_chunk_store_args(self.parser)
+
+    def test_missing_args(self, error):
+        with assert_raises(BadArguments):
+            chunk_store_from_args(self.parser, self.parser.parse_args([]))
+        error.assert_called_with('--s3-endpoint-url is required if --npy-path is not given')
+        with assert_raises(BadArguments):
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--s3-endpoint-url', 'http://invalid/', '--s3-access-key', 'ACCESS']))
+        error.assert_called_with('--s3-secret-key is required if --npy-path is not given')
+
+    def test_missing_path(self, error):
+        with assert_raises(BadArguments):
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--npy-path=/doesnotexist']))
+        error.assert_called_with('Specified --npy-path (/doesnotexist) does not exist.')
+
+    def test_npy(self, error):
+        with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
+            chunk_store = chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--npy-path=/']))
+        m.assert_called_with('/')
+
+    def test_s3(self, error):
+        with mock.patch('katdal.chunkstore_s3.S3ChunkStore.from_url') as m:
+            chunk_store = chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--s3-endpoint-url=https://s3.invalid',
+                 '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS']))
+        m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'))

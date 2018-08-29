@@ -16,9 +16,9 @@ import asyncio
 import aiomonitor
 import katsdptelstate
 import katsdpservices
-import katdal.chunkstore_npy
 
 from katsdpdatawriter.flag_writer import FlagWriterServer
+from katsdpdatawriter.spead_write import add_chunk_store_args, chunk_store_from_args
 
 
 def on_shutdown(loop: asyncio.AbstractEventLoop, server: FlagWriterServer) -> None:
@@ -42,8 +42,7 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    parser.add_argument('--npy-path', default="/var/kat/data", metavar='NPYPATH',
-                        help='Root in which to write flag dumps in npy format.')
+    spead_write.add_chunk_store_args(parser)
     parser.add_argument('--flags-spead', default=':7202', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7202),
                         help='Source port/multicast groups for flags SPEAD streams. '
@@ -73,12 +72,9 @@ if __name__ == '__main__':
         parser.error('--telstate is required')
     if args.flags_ibv and args.flags_interface is None:
         parser.error("--flags-ibv requires --flags-interface")
-    if not os.path.isdir(args.npy_path):
-        parser.error("Specified NPY path, %s, does not exist.", args.npy_path)
 
+    chunk_store = spead_write.chunk_store_from_args(parser, args)
     loop = asyncio.get_event_loop()
-
-    chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(args.npy_path)
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.flags_ibv, chunk_store,
                               args.telstate, args.flags_name, args.workers)
