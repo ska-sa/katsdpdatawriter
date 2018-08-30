@@ -1,6 +1,7 @@
 aioconsole
 aiokatcp
 aiomonitor
+async-timeout
 attrs==18.1.0
 certifi
 chardet
