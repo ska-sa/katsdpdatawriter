@@ -412,7 +412,7 @@ def make_receiver(endpoints: Sequence[Endpoint],
                                     ring_heaps=ring_heaps,
                                     contiguous_only=False)
     n_memory_buffers = max_heaps + ring_heaps + 2
-    heap_size = sum(a.nbytes for a in arrays)
+    heap_size = sum(a.nbytes // a.substreams for a in arrays)
     memory_pool = spead2.MemoryPool(heap_size, heap_size + 4096,
                                     n_memory_buffers, n_memory_buffers)
     rx.set_memory_pool(memory_pool)
