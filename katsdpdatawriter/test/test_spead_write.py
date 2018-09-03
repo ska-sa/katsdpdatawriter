@@ -8,7 +8,7 @@ from aiokatcp import SensorSet
 from katdal.chunkstore import ChunkStore
 
 from ..spead_write import (Array, RechunkerGroup, io_sensors,
-                           add_chunk_store_args, chunk_store_from_args)
+                           add_common_args, chunk_store_from_args)
 from ..rechunk import Offset
 from ..bounded_executor import BoundedThreadPoolExecutor
 
@@ -131,7 +131,7 @@ class BadArguments(Exception):
 class TestChunkStoreFromArgs:
     def setup(self) -> None:
         self.parser = argparse.ArgumentParser()
-        add_chunk_store_args(self.parser)
+        add_common_args(self.parser)
 
     def test_missing_args(self, error):
         with assert_raises(BadArguments):

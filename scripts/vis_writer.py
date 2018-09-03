@@ -9,7 +9,7 @@ import katsdpservices
 import katsdptelstate
 
 from katsdpdatawriter.vis_writer import VisibilityWriterServer
-from katsdpdatawriter.spead_write import add_chunk_store_args, chunk_store_from_args
+from katsdpdatawriter.spead_write import add_common_args, chunk_store_from_args
 
 
 def on_shutdown(loop: asyncio.AbstractEventLoop, server: VisibilityWriterServer) -> None:
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     katsdpservices.setup_restart()
 
     parser = katsdpservices.ArgumentParser()
-    add_chunk_store_args(parser)
+    add_common_args(parser)
     parser.add_argument('--l0-spead', default=':7200', metavar='ENDPOINTS',
                         type=katsdptelstate.endpoint.endpoint_list_parser(7200),
                         help='Source port/multicast groups for L0 SPEAD stream. '
@@ -45,21 +45,7 @@ if __name__ == '__main__':
                         help='Name of L0 stream from ingest [default=%(default)s]')
     parser.add_argument('--l0-ibv', action='store_true',
                         help='Use ibverbs acceleration to receive L0 stream [default=no]')
-    parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
-                        help='Target object size in MB [default=%(default)s]')
-    parser.add_argument('--workers', type=int, default=50,
-                        help='Threads to use for writing chunks')
-    parser.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
-                        help='Disable aiomonitor debugging server')
-    parser.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
-                        help='port for aiomonitor [default=%(default)s]')
-    parser.add_argument('--aioconsole-port', type=int, default=aiomonitor.CONSOLE_PORT,
-                        help='port for aioconsole [default=%(default)s]')
-    parser.add_argument('-p', '--port', type=int, default=2046, metavar='N',
-                        help='KATCP host port [default=%(default)s]')
-    parser.add_argument('-a', '--host', default="", metavar='HOST',
-                        help='KATCP host address [default=all hosts]')
-    parser.set_defaults(telstate='localhost')
+    parser.set_defaults(telstate='localhost', port=2046)
     args = parser.parse_args()
 
     if args.l0_ibv and args.l0_interface is None:

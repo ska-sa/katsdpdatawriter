@@ -74,18 +74,6 @@ def _status_status(value: Status) -> aiokatcp.Sensor.Status:
         return Sensor.Status.NOMINAL
 
 
-def _make_array(name, in_chunks: Tuple[Tuple[int]],
-                fill_value: Any, dtype: Any, chunk_size: float) -> spead_write.Array:
-    # Shape of a single input chunk
-    shape = tuple(c[0] for c in in_chunks)
-    # Compute the decomposition of each input chunk
-    chunks = katdal.chunkstore.generate_chunks(shape, dtype, chunk_size,
-                                               dims_to_split=(0, 1), power_of_two=True)
-    # Repeat for each input chunk
-    out_chunks = tuple(outc * len(inc) for inc, outc in zip(in_chunks, chunks))
-    return spead_write.Array(name, in_chunks, out_chunks, fill_value, dtype)
-
-
 class VisibilityWriter(spead_write.SpeadWriter):
     """Glue between :class:`~.SpeadWriter` and :class:`VisibilityWriterServer`."""
     def __init__(self, sensors: SensorSet, rx: spead2.recv.asyncio.Stream,
@@ -122,10 +110,10 @@ class VisibilityWriterServer(DeviceServer):
         in_chunks = spead_write.chunks_from_telstate(telstate_l0)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
         self._arrays = [
-            _make_array('correlator_data', in_chunks, 0, np.complex64, chunk_size),
-            _make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size),
-            _make_array('weights', in_chunks, 0, np.uint8, chunk_size),
-            _make_array('weights_channel', in_chunks[:2], 0, np.float32, chunk_size)
+            spead_write.make_array('correlator_data', in_chunks, 0, np.complex64, chunk_size),
+            spead_write.make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size),
+            spead_write.make_array('weights', in_chunks, 0, np.uint8, chunk_size),
+            spead_write.make_array('weights_channel', in_chunks[:2], 0, np.float32, chunk_size)
         ]
         self._capture_task = None     # type: Optional[asyncio.Task]
         self._n_substreams = len(in_chunks[1])

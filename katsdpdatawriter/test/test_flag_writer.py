@@ -3,6 +3,7 @@
 import tempfile
 import shutil
 from unittest import mock
+from typing import Dict, Any
 
 import numpy as np
 from nose.tools import (assert_equal, assert_true,
@@ -24,7 +25,8 @@ class TestFlagWriterServer(BaseTestWriterServer):
     async def setup_server(self) -> FlagWriterServer:
         server = FlagWriterServer(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
-            flag_interface='lo', flags_ibv=False, chunk_store=self.chunk_store,
+            flag_interface='lo', flags_ibv=False,
+            chunk_store=self.chunk_store, chunk_size=self.chunk_size,
             telstate=self.telstate, flags_name='sdp_l1_flags', max_workers=4)
         await server.start()
         self.addCleanup(server.stop)
@@ -62,35 +64,36 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.addCleanup(shutil.rmtree, self.npy_path)
         self.chunk_store = NpyFileChunkStore(self.npy_path)
         self.telstate = self.setup_telstate()
+        self.chunk_channels = 128
+        self.chunk_size = self.telstate['n_bls'] * self.chunk_channels
         self.setup_sleep()
         self.setup_spead()
         self.server = await self.setup_server()
         self.client = await self.setup_client(self.server)
         self.ig = self.setup_ig()
 
-    def _check_chunk_info(self) -> None:
+    def _check_chunk_info(self) -> Dict[str, Any]:
         n_chans = self.telstate['n_chans']
-        n_chans_per_substream = self.telstate['n_chans_per_substream']
         n_bls = self.telstate['n_bls']
         capture_stream = self.cbid + '_sdp_l1_flags'
 
         view = self.telstate.view(capture_stream)
         chunk_info = view['chunk_info']
-        n_substreams = n_chans // n_chans_per_substream
+        n_chunks = n_chans // self.chunk_channels
         assert_equal(
             chunk_info,
             {
                 'flags': {
                     'prefix': capture_stream,
                     'shape': (1, n_chans, n_bls),
-                    'chunks': ((1,), (n_chans_per_substream,) * n_substreams, (n_bls,)),
+                    'chunks': ((1,), (self.chunk_channels,) * n_chunks, (n_bls,)),
                     'dtype': np.dtype(np.uint8)
                 }
             })
+        return chunk_info['flags']
 
     async def test_capture(self) -> None:
         n_chans_per_substream = self.telstate['n_chans_per_substream']
-        n_bls = self.telstate['n_bls']
         self.assert_sensor_equals('status', Status.WAIT_DATA)
         self.assert_sensor_equals('capture-block-state', '{}')
 
@@ -106,12 +109,16 @@ class TestFlagWriterServer(BaseTestWriterServer):
         await self.stop_server()
         capture_stream = self.cbid + '_sdp_l1_flags'
         assert_true(self.chunk_store.is_complete(capture_stream))
-        chunk = self.chunk_store.get_chunk(
-            self.chunk_store.join(capture_stream, 'flags'),
-            np.s_[0:1, 0:n_chans_per_substream, 0:n_bls], np.uint8)
-        np.testing.assert_array_equal(self.ig['flags'].value[np.newaxis], chunk)
 
-        self._check_chunk_info()
+        # Validate the data written
+        chunk_info = self._check_chunk_info()
+        data = self.chunk_store.get_dask_array(
+            self.chunk_store.join(capture_stream, 'flags'),
+            chunk_info['chunks'], chunk_info['dtype']).compute()
+        n_chans_per_substream = self.telstate['n_chans_per_substream']
+        np.testing.assert_array_equal(self.ig['flags'].value[np.newaxis],
+                                      data[:, :n_chans_per_substream, :])
+        np.testing.assert_equal(0, data[:, n_chans_per_substream:, :])
 
     async def test_failed_write(self) -> None:
         with mock.patch.object(NpyFileChunkStore, 'put_chunk',
