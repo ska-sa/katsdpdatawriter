@@ -17,7 +17,7 @@ from katsdptelstate.endpoint import Endpoint
 
 import katsdpdatawriter
 from . import spead_write
-from .spead_write import RechunkerGroup, Array
+from .spead_write import RechunkerGroup
 from .bounded_executor import BoundedThreadPoolExecutor
 
 
@@ -68,16 +68,14 @@ class FlagWriterServer(DeviceServer):
     BUILD_STATE = "katsdpdatawriter-" + katsdpdatawriter.__version__
 
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
-                 endpoints: List[Endpoint], flag_interface: Optional[str],
-                 flags_ibv: bool, chunk_store: katdal.chunkstore.ChunkStore,
+                 endpoints: List[Endpoint], flag_interface: Optional[str], flags_ibv: bool,
+                 chunk_store: katdal.chunkstore.ChunkStore, chunk_size: float,
                  telstate: katsdptelstate.TelescopeState, flags_name: str,
                  max_workers: int) -> None:
         super().__init__(host, port, loop=loop)
 
         self._chunk_store = chunk_store
-        self._telstate_flags = telstate.view(flags_name)
         self._telstate = telstate
-        self._endpoints = endpoints
         # track the status of each capture block we have seen to date
         self._capture_block_state = {}   # type: Dict[str, State]
         self._flags_name = flags_name
@@ -95,13 +93,15 @@ class FlagWriterServer(DeviceServer):
             self.sensors.add(sensor)
         self.sensors.add(spead_write.device_status_sensor())
 
-        in_chunks = spead_write.chunks_from_telstate(self._telstate_flags)
-        out_chunks = in_chunks   # For now - will change later
+        telstate_flags = telstate.view(flags_name)
+        in_chunks = spead_write.chunks_from_telstate(telstate_flags)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
-        self._arrays = [Array('flags', in_chunks, out_chunks, DATA_LOST, np.uint8)]
+        self._arrays = [
+            spead_write.make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size)
+        ]
 
         rx = spead_write.make_receiver(
-            self._endpoints, self._arrays,
+            endpoints, self._arrays,
             katsdpservices.get_interface_address(flag_interface), flags_ibv)
         self._writer = FlagWriter(self.sensors, rx, self)
         self._capture_task = loop.create_task(self._do_capture())

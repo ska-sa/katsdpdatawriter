@@ -2,6 +2,8 @@
 Receive heaps from a SPEAD stream and write corresponding data to a chunk store.
 """
 
+import argparse
+import os.path
 import time
 import enum
 import logging
@@ -11,10 +13,13 @@ from typing import Optional, Any, Sequence, Iterable, Set, Dict, Tuple   # noqa:
 
 import numpy as np
 import attr
+import aiomonitor
 from aiokatcp import Sensor, SensorSet
 import spead2
 import spead2.recv.asyncio
 import katdal.chunkstore
+import katdal.chunkstore_npy
+import katdal.chunkstore_s3
 from katsdptelstate.endpoint import Endpoint
 
 from . import rechunk
@@ -129,6 +134,24 @@ class Array:
     @property
     def nbytes(self):
         return int(np.product(self.shape)) * self.dtype.itemsize
+
+
+def make_array(name, in_chunks: Tuple[Tuple[int]],
+               fill_value: Any, dtype: Any, chunk_size: float) -> Array:
+    """Create an :class:`Array` with computed output chunk scheme.
+
+    The output chunks are determined by splitting the input chunks along axes 0
+    and 1 (time and frequency in typical use) to produce chunks of
+    approximately `chunk_size` bytes.
+    """
+    # Shape of a single input chunk
+    shape = tuple(c[0] for c in in_chunks)
+    # Compute the decomposition of each input chunk
+    chunks = katdal.chunkstore.generate_chunks(shape, dtype, chunk_size,
+                                               dims_to_split=(0, 1), power_of_two=True)
+    # Repeat for each input chunk
+    out_chunks = tuple(outc * len(inc) for inc, outc in zip(in_chunks, chunks))
+    return Array(name, in_chunks, out_chunks, fill_value, dtype)
 
 
 class ChunkStoreRechunker(rechunk.Rechunker):
@@ -432,3 +455,61 @@ def make_receiver(endpoints: Sequence[Endpoint],
                 rx.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
                                   buffer_size=heap_size + 4096)
     return rx
+
+
+def add_common_args(parser: argparse.ArgumentParser) -> None:
+    """Inject command-line arguments that are common to the writers"""
+    group = parser.add_argument_group('Chunk store options')
+    group.add_argument('--npy-path', metavar='PATH',
+                       help='Write NPY files to this directory instead of '
+                            'directly to object store')
+    group.add_argument('--s3-endpoint-url', metavar='URL',
+                       help='URL of S3 gateway to Ceph cluster')
+    group.add_argument('--s3-access-key', metavar='KEY',
+                       help='Access key for S3')
+    group.add_argument('--s3-secret-key', metavar='KEY',
+                       help='Secret key for S3')
+
+    parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
+                        help='Target object size in MB [default=%(default)s]')
+    parser.add_argument('--workers', type=int, default=50,
+                        help='Threads to use for writing chunks')
+    parser.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
+                        help='Disable aiomonitor debugging server')
+    parser.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
+                        help='port for aiomonitor [default=%(default)s]')
+    parser.add_argument('--aioconsole-port', type=int, default=aiomonitor.CONSOLE_PORT,
+                        help='port for aioconsole [default=%(default)s]')
+    parser.add_argument('-p', '--port', type=int, metavar='N',
+                        help='KATCP host port [default=%(default)s]')
+    parser.add_argument('-a', '--host', default="", metavar='HOST',
+                        help='KATCP host address [default=all hosts]')
+
+
+def chunk_store_from_args(parser: argparse.ArgumentParser,
+                          args: argparse.Namespace) -> katdal.chunkstore.ChunkStore:
+    """Create a chunk store from user-provided arguments.
+
+    This checks that a consistent set of the arguments created by
+    :meth:`add_common_arguments` was given by the user. If not, it calls
+    ``parser.error`` (which terminates the process). Otherwise, it returns a
+    new chunk store (any exceptions from the chunk store constructor are passed
+    through.
+    """
+    if not args.npy_path:
+        for arg_name in ['s3_endpoint_url', 's3_access_key', 's3_secret_key']:
+            if not getattr(args, arg_name):
+                parser.error('--{} is required if --npy-path is not given'
+                             .format(arg_name.replace('_', '-')))
+                # Real parser.error kills the process, but the unit tests mock
+                # it and so we want to ensure that we don't carry on.
+    else:
+        if not os.path.isdir(args.npy_path):
+            parser.error("Specified --npy-path ({}) does not exist.".format(args.npy_path))
+
+    if args.npy_path:
+        chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(args.npy_path)
+    else:
+        chunk_store = katdal.chunkstore_s3.S3ChunkStore.from_url(
+            args.s3_endpoint_url, credentials=(args.s3_access_key, args.s3_secret_key))
+    return chunk_store
