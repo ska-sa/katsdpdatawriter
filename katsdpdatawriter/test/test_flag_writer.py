@@ -22,12 +22,16 @@ from .test_writer import BaseTestWriterServer
 
 
 class TestFlagWriterServer(BaseTestWriterServer):
-    async def setup_server(self) -> FlagWriterServer:
-        server = FlagWriterServer(
+    async def setup_server(self, **arg_overrides) -> FlagWriterServer:
+        args = dict(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
             flag_interface='lo', flags_ibv=False,
             chunk_store=self.chunk_store, chunk_size=self.chunk_size,
-            telstate=self.telstate, flags_name='sdp_l1_flags', max_workers=4)
+            telstate=self.telstate.root(),
+            input_name='sdp_l1_flags', output_name='sdp_l1_flags', rename_src={},
+            s3_endpoint_url=None, max_workers=4)
+        args.update(arg_overrides)
+        server = FlagWriterServer(**args)
         await server.start()
         self.addCleanup(server.stop)
         return server
@@ -63,7 +67,8 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.npy_path = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.npy_path)
         self.chunk_store = NpyFileChunkStore(self.npy_path)
-        self.telstate = self.setup_telstate()
+        self.telstate = self.setup_telstate('sdp_l1_flags')
+        self.telstate.add('src_streams', ['sdp_l0'], immutable=True)
         self.chunk_channels = 128
         self.chunk_size = self.telstate['n_bls'] * self.chunk_channels
         self.setup_sleep()
@@ -72,12 +77,12 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.client = await self.setup_client(self.server)
         self.ig = self.setup_ig()
 
-    def _check_chunk_info(self) -> Dict[str, Any]:
+    def _check_chunk_info(self, output_name: str = 'sdp_l1_flags') -> Dict[str, Any]:
         n_chans = self.telstate['n_chans']
         n_bls = self.telstate['n_bls']
-        capture_stream = self.cbid + '_sdp_l1_flags'
+        capture_stream = '{}_{}'.format(self.cbid, output_name)
 
-        view = self.telstate.view(capture_stream)
+        view = self.telstate.root().view(capture_stream)
         chunk_info = view['chunk_info']
         n_chunks = n_chans // self.chunk_channels
         assert_equal(
@@ -92,7 +97,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
             })
         return chunk_info['flags']
 
-    async def test_capture(self) -> None:
+    async def test_capture(self, output_name: str = 'sdp_l1_flags') -> None:
         n_chans_per_substream = self.telstate['n_chans_per_substream']
         self.assert_sensor_equals('status', Status.WAIT_DATA)
         self.assert_sensor_equals('capture-block-state', '{}')
@@ -107,11 +112,11 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.assert_sensor_equals('status', Status.CAPTURING)  # Should still be capturing
         self.assert_sensor_equals('capture-block-state', '{}')
         await self.stop_server()
-        capture_stream = self.cbid + '_sdp_l1_flags'
+        capture_stream = '{}_{}'.format(self.cbid, output_name)
         assert_true(self.chunk_store.is_complete(capture_stream))
 
         # Validate the data written
-        chunk_info = self._check_chunk_info()
+        chunk_info = self._check_chunk_info(output_name)
         data = self.chunk_store.get_dask_array(
             self.chunk_store.join(capture_stream, 'flags'),
             chunk_info['chunks'], chunk_info['dtype']).compute()
@@ -119,6 +124,22 @@ class TestFlagWriterServer(BaseTestWriterServer):
         np.testing.assert_array_equal(self.ig['flags'].value[np.newaxis],
                                       data[:, :n_chans_per_substream, :])
         np.testing.assert_equal(0, data[:, n_chans_per_substream:, :])
+
+    async def test_new_name(self) -> None:
+        # Replace client and server with different args
+        output_name = 'sdp_l1_flags_new'
+        rename_src = {'sdp_l0': 'sdp_l0_new'}
+        s3_endpoint_url = 'http://new.invalid/'
+        await self.server.stop()
+        self.server = await self.setup_server(output_name=output_name,
+                                              rename_src=rename_src,
+                                              s3_endpoint_url=s3_endpoint_url)
+        self.client = await self.setup_client(self.server)
+        await self.test_capture(output_name)
+        telstate_output = self.telstate.root().view(output_name)
+        assert_equal(telstate_output['inherit'], 'sdp_l1_flags')
+        assert_equal(telstate_output['s3_endpoint_url'], s3_endpoint_url)
+        assert_equal(telstate_output['src_streams'], ['sdp_l0_new'])
 
     async def test_failed_write(self) -> None:
         with mock.patch.object(NpyFileChunkStore, 'put_chunk',

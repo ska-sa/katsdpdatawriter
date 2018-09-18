@@ -2,6 +2,7 @@
 Receive heaps from a SPEAD stream and write corresponding data to a chunk store.
 """
 
+import copy
 import argparse
 import os.path
 import time
@@ -9,7 +10,7 @@ import enum
 import logging
 import concurrent.futures
 import asyncio
-from typing import Optional, Any, Sequence, Iterable, Set, Dict, Tuple   # noqa: F401
+from typing import Optional, Any, Sequence, Iterable, Mapping, Set, Dict, Tuple   # noqa: F401
 
 import numpy as np
 import attr
@@ -20,6 +21,7 @@ import spead2.recv.asyncio
 import katdal.chunkstore
 import katdal.chunkstore_npy
 import katdal.chunkstore_s3
+import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
 
 from . import rechunk
@@ -403,6 +405,22 @@ def chunks_from_telstate(telstate):
     return ((1,), (n_chans_per_substream,) * n_substreams, (n_bls,))
 
 
+def write_telstate(telstate: katsdptelstate.TelescopeState,
+                   input_name: str, output_name: str, rename_src: Mapping[str, str],
+                   s3_endpoint_url: Optional[str]) -> None:
+    """Write telstate information about output stream."""
+    telstate_out = telstate.view(output_name)
+    if output_name != input_name:
+        telstate_out.add('inherit', input_name, immutable=True)
+        if rename_src:
+            telstate_in = telstate.view(input_name)
+            src_streams_in = telstate_in['src_streams']
+            src_streams_out = [rename_src.get(stream, stream) for stream in src_streams_in]
+            telstate_out.add('src_streams', src_streams_out, immutable=True)
+    if s3_endpoint_url is not None:
+        telstate_out.add('s3_endpoint_url', s3_endpoint_url, immutable=True)
+
+
 def make_receiver(endpoints: Sequence[Endpoint],
                   arrays: Sequence[Array],
                   interface_address: Optional[str],
@@ -457,6 +475,50 @@ def make_receiver(endpoints: Sequence[Endpoint],
     return rx
 
 
+class _DictAction(argparse.Action):
+    """Argparse action that takes argument of form KEY:VALUE and updates a dict with it.
+
+    The input value is expected to be a 2-tuple, so the type must be one that
+    generates such a tuple.
+    """
+    def __init__(self, option_strings, dest, nargs=None, const=None, default=None,
+                 type=None, choices=None, required=False, help=None, metavar=None):
+        # This code is somewhat cargo-culted from _AppendAction in the argparse
+        # source.
+        if nargs == 0:
+            raise ValueError('nargs for dict action must be > 0')
+        if const is not None:
+            raise ValueError('const is not supported for dict action')
+        super().__init__(
+                option_strings=option_strings,
+                dest=dest,
+                nargs=nargs,
+                const=const,
+                default=default,
+                type=type,
+                choices=choices,
+                required=required,
+                help=help,
+                metavar=metavar)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        d = getattr(namespace, self.dest, None)
+        if d is None:
+            d = {}
+        else:
+            d = copy.copy(d)
+        d.update([values])
+        setattr(namespace, self.dest, d)
+
+
+def _split_colon(value):
+    "Splits a KEY:VALUE string into its two parts"""
+    parts = value.split(':')
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError('Expected exactly one colon in {!r}'.format(value))
+    return parts
+
+
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     """Inject command-line arguments that are common to the writers"""
     group = parser.add_argument_group('Chunk store options')
@@ -470,6 +532,11 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument('--s3-secret-key', metavar='KEY',
                        help='Secret key for S3')
 
+    parser.add_argument('--new-name', metavar='NAME',
+                        help='Name for the output stream')
+    parser.add_argument('--rename-src', metavar='OLD-NAME:NEW-NAME',
+                        type=_split_colon, action=_DictAction,
+                        help='Rewrite src_streams for new name (repeat for each rename)')
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('--workers', type=int, default=50,

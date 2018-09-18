@@ -15,8 +15,8 @@ from nose.tools import assert_equal, assert_in
 
 class BaseTestWriterServer(asynctest.TestCase):
     @classmethod
-    def setup_telstate(cls) -> katsdptelstate.TelescopeState:
-        telstate = katsdptelstate.TelescopeState()
+    def setup_telstate(cls, namespace: str) -> katsdptelstate.TelescopeState:
+        telstate = katsdptelstate.TelescopeState().view(namespace)
         n_ants = 3
         telstate.add('n_chans', 4096, immutable=True)
         telstate.add('n_chans_per_substream', 1024, immutable=True)

@@ -38,7 +38,7 @@ The following useful object parameters are stored in telstate:
 import asyncio
 import logging
 import enum
-from typing import List, Tuple, Dict, Any, Optional   # noqa: F401
+from typing import List, Tuple, Dict, Any, Optional, Mapping   # noqa: F401
 
 import numpy as np
 import aiokatcp
@@ -95,19 +95,23 @@ class VisibilityWriterServer(DeviceServer):
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
                  endpoints: List[Endpoint], interface: Optional[str], ibv: bool,
                  chunk_store: katdal.chunkstore.ChunkStore, chunk_size: float,
-                 telstate_l0: katsdptelstate.TelescopeState, stream_name: str,
+                 telstate: katsdptelstate.TelescopeState,
+                 input_name: str, output_name: str, rename_src: Mapping[str, str],
+                 s3_endpoint_url: Optional[str],
                  max_workers: int) -> None:
         super().__init__(host, port, loop=loop)
         self._endpoints = endpoints
         self._interface_address = katsdpservices.get_interface_address(interface)
         self._ibv = ibv
         self._chunk_store = chunk_store
-        self._stream_name = stream_name
-        self._telstate_l0 = telstate_l0
+        self._input_name = input_name
+        self._output_name = output_name
+        self._telstate = telstate
         self._rx = None    # type: Optional[spead2.recv.asyncio.Stream]
         self._max_workers = max_workers
 
-        in_chunks = spead_write.chunks_from_telstate(telstate_l0)
+        telstate_input = telstate.view(input_name)
+        in_chunks = spead_write.chunks_from_telstate(telstate_input)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
         self._arrays = [
             spead_write.make_array('correlator_data', in_chunks, 0, np.complex64, chunk_size),
@@ -115,6 +119,8 @@ class VisibilityWriterServer(DeviceServer):
             spead_write.make_array('weights', in_chunks, 0, np.uint8, chunk_size),
             spead_write.make_array('weights_channel', in_chunks[:2], 0, np.float32, chunk_size)
         ]
+        spead_write.write_telstate(telstate, input_name, output_name, rename_src, s3_endpoint_url)
+
         self._capture_task = None     # type: Optional[asyncio.Task]
         self._n_substreams = len(in_chunks[1])
 
@@ -141,8 +147,8 @@ class VisibilityWriterServer(DeviceServer):
             await writer.run(stops=self._n_substreams)
 
             self.sensors['status'].value = Status.FINALISING
-            view = self._telstate_l0.view(capture_stream_name)
-            view.add('chunk_info', await rechunker_group.get_chunk_info())
+            view = self._telstate.view(capture_stream_name)
+            view.add('chunk_info', await rechunker_group.get_chunk_info(), immutable=True)
             rechunker_group = None   # Tells except block not to clean up
             self._chunk_store.mark_complete(capture_stream_name)
             self.sensors['status'].value = Status.COMPLETE
@@ -165,8 +171,8 @@ class VisibilityWriterServer(DeviceServer):
             raise FailReply('Already capturing')
         self.sensors['status'].value = Status.WAIT_DATA
         self.sensors['device-status'].value = spead_write.DeviceStatus.OK
-        sep = self._telstate_l0.SEPARATOR
-        capture_stream_name = sep.join((capture_block_id, self._stream_name))
+        sep = self._telstate.SEPARATOR
+        capture_stream_name = sep.join((capture_block_id, self._output_name))
         self._rx = spead_write.make_receiver(
             self._endpoints, self._arrays, self._interface_address, self._ibv)
         self._capture_task = self.loop.create_task(self._do_capture(capture_stream_name, self._rx))

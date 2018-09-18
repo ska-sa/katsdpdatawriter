@@ -60,13 +60,19 @@ if __name__ == '__main__':
         parser.error('--telstate is required')
     if args.flags_ibv and args.flags_interface is None:
         parser.error("--flags-ibv requires --flags-interface")
+    if args.rename_src and args.new_name is None:
+        parser.error('--rename-src requires --new-name')
 
     chunk_store = chunk_store_from_args(parser, args)
     loop = asyncio.get_event_loop()
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.flags_ibv,
                               chunk_store, args.obj_size_mb * 1e6,
-                              args.telstate, args.flags_name, args.workers)
+                              args.telstate,
+                              args.flags_name,
+                              args.new_name if args.new_name is not None else args.flags_name,
+                              args.rename_src, args.s3_endpoint_url,
+                              args.workers)
 
     if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop,

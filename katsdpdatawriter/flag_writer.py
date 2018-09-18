@@ -2,7 +2,7 @@ import logging
 import enum
 import json
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
 import spead2
@@ -70,7 +70,9 @@ class FlagWriterServer(DeviceServer):
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
                  endpoints: List[Endpoint], flag_interface: Optional[str], flags_ibv: bool,
                  chunk_store: katdal.chunkstore.ChunkStore, chunk_size: float,
-                 telstate: katsdptelstate.TelescopeState, flags_name: str,
+                 telstate: katsdptelstate.TelescopeState,
+                 input_name: str, output_name: str, rename_src: Mapping[str, str],
+                 s3_endpoint_url: Optional[str],
                  max_workers: int) -> None:
         super().__init__(host, port, loop=loop)
 
@@ -78,7 +80,8 @@ class FlagWriterServer(DeviceServer):
         self._telstate = telstate
         # track the status of each capture block we have seen to date
         self._capture_block_state = {}   # type: Dict[str, State]
-        self._flags_name = flags_name
+        self._input_name = input_name
+        self._output_name = output_name
         # rechunker group for each CBID
         self._flag_streams = {}          # type: Dict[str, RechunkerGroup]
         self._executor = BoundedThreadPoolExecutor(max_workers=max_workers)
@@ -93,12 +96,13 @@ class FlagWriterServer(DeviceServer):
             self.sensors.add(sensor)
         self.sensors.add(spead_write.device_status_sensor())
 
-        telstate_flags = telstate.view(flags_name)
-        in_chunks = spead_write.chunks_from_telstate(telstate_flags)
+        telstate_input = telstate.view(input_name)
+        in_chunks = spead_write.chunks_from_telstate(telstate_input)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
         self._arrays = [
             spead_write.make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size)
         ]
+        spead_write.write_telstate(telstate, input_name, output_name, rename_src, s3_endpoint_url)
 
         rx = spead_write.make_receiver(
             endpoints, self._arrays,
@@ -119,7 +123,8 @@ class FlagWriterServer(DeviceServer):
         return self._capture_block_state.get(capture_block_id, None)
 
     def _get_capture_stream_name(self, capture_block_id: str) -> str:
-        return "{}_{}".format(capture_block_id, self._flags_name)
+        """Gets the capture-stream name of the output stream"""
+        return "{}_{}".format(capture_block_id, self._output_name)
 
     def rechunker_group(self, cbid: str) -> Optional[RechunkerGroup]:
         extra = dict(capture_block_id=cbid)

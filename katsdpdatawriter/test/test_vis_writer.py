@@ -8,7 +8,7 @@ import numpy as np
 import katdal.chunkstore_npy
 import spead2.send.asyncio
 from aiokatcp import FailReply, Sensor
-from nose.tools import assert_raises_regex, assert_true, assert_in
+from nose.tools import assert_equal, assert_raises_regex, assert_true, assert_in
 
 from ..vis_writer import VisibilityWriterServer, Status
 from ..spead_write import DeviceStatus
@@ -16,12 +16,15 @@ from .test_writer import BaseTestWriterServer
 
 
 class TestVisWriterServer(BaseTestWriterServer):
-    async def setup_server(self) -> VisibilityWriterServer:
-        server = VisibilityWriterServer(
+    async def setup_server(self, **arg_overrides) -> VisibilityWriterServer:
+        args = dict(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
             interface='lo', ibv=False, chunk_store=self.chunk_store, chunk_size=10000,
-            telstate_l0=self.telstate, stream_name='sdp_l0',
-            max_workers=4)
+            telstate=self.telstate.root(),
+            input_name='sdp_l0', output_name='sdp_l0', rename_src={},
+            s3_endpoint_url=None, max_workers=4)
+        args.update(arg_overrides)
+        server = VisibilityWriterServer(**args)
         await server.start()
         self.addCleanup(server.stop)
         return server
@@ -70,14 +73,15 @@ class TestVisWriterServer(BaseTestWriterServer):
         npy_path = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, npy_path)
         self.chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(npy_path)
-        self.telstate = self.setup_telstate()
+        self.telstate = self.setup_telstate('sdp_l0')
+        self.telstate.add('src_streams', ['i0_baseline_correlation_products'], immutable=True)
         self.setup_sleep()
         self.setup_spead()
         self.server = await self.setup_server()
         self.client = await self.setup_client(self.server)
         self.ig = self.setup_ig()
 
-    async def test_capture(self) -> None:
+    async def test_capture(self, output_name: str = 'sdp_l0') -> None:
         cbid = '1234567890'
         self.assert_sensor_equals('status', Status.IDLE)
         await self.client.request('capture-init', cbid)
@@ -94,7 +98,22 @@ class TestVisWriterServer(BaseTestWriterServer):
         assert_in(self.server.sensors['status'].value, {Status.FINALISING, Status.COMPLETE})
         await self.client.request('capture-done')
         self.assert_sensor_equals('status', Status.IDLE)
-        assert_true(self.chunk_store.is_complete(cbid + '_sdp_l0'))
+        capture_stream = '{}_{}'.format(cbid, output_name)
+        assert_true(self.chunk_store.is_complete(capture_stream))
+
+    async def test_new_name(self) -> None:
+        # Replace the client+server to use new arguments
+        output_name = 'sdp_l0_new'
+        s3_endpoint_url = 'http://sdp_l0_new.invalid/'
+        await self.server.stop()
+        self.server = await self.setup_server(output_name=output_name,
+                                              s3_endpoint_url=s3_endpoint_url)
+        self.client = await self.setup_client(self.server)
+        # Run the test
+        await self.test_capture(output_name)
+        telstate_output = self.telstate.root().view(output_name)
+        assert_equal(telstate_output['s3_endpoint_url'], s3_endpoint_url)
+        assert_equal(telstate_output['inherit'], 'sdp_l0')
 
     async def test_failed_write(self) -> None:
         cbid = '1234567890'

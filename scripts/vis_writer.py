@@ -50,18 +50,21 @@ if __name__ == '__main__':
 
     if args.l0_ibv and args.l0_interface is None:
         parser.error('--l0-ibv requires --l0-interface')
+    if args.rename_src and args.new_name is None:
+        parser.error('--rename-src requires --new-name')
 
-    # Connect to object store and save config in telstate
+    # Connect to object store
     chunk_store = chunk_store_from_args(parser, args)
-    telstate_l0 = args.telstate.view(args.l0_name)
-    if args.s3_endpoint_url:
-        telstate_l0.add('s3_endpoint_url', args.s3_endpoint_url, immutable=True)
-
     loop = asyncio.get_event_loop()
     server = VisibilityWriterServer(args.host, args.port, loop, args.l0_spead,
                                     args.l0_interface, args.l0_ibv,
                                     chunk_store, args.obj_size_mb * 1e6,
-                                    telstate_l0, args.l0_name, args.workers)
+                                    args.telstate,
+                                    args.l0_name,
+                                    args.new_name if args.new_name is not None else args.l0_name,
+                                    args.rename_src,
+                                    args.s3_endpoint_url,
+                                    args.workers)
 
     if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop,

@@ -129,6 +129,7 @@ class BadArguments(Exception):
 
 @mock.patch.object(argparse.ArgumentParser, 'error', side_effect=BadArguments)
 class TestChunkStoreFromArgs:
+    """Test both :meth:`.add_common_args` and :meth:`.chunk_store_from_args`"""
     def setup(self) -> None:
         self.parser = argparse.ArgumentParser()
         add_common_args(self.parser)
@@ -160,3 +161,13 @@ class TestChunkStoreFromArgs:
                 ['--s3-endpoint-url=https://s3.invalid',
                  '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS']))
         m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'))
+
+    def test_rename_src(self, error):
+        args = self.parser.parse_args([
+            '--rename-src=foo:bar', '--rename-src', 'x:y',
+            '--new-name', 'xyz'])
+        assert_equal(args.rename_src, {'foo': 'bar', 'x': 'y'})
+
+    def test_rename_src_bad_colons(self, error):
+        with assert_raises(BadArguments):
+            self.parser.parse_args(['--rename-src=foo:bar:baz', '--new-name', 'xyz'])
