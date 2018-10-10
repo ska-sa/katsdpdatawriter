@@ -16,7 +16,9 @@ idna
 ipaddress
 katpoint==0.7
 katversion
+llvmlite
 netifaces
+numba
 numpy
 pyephem
 pygelf
