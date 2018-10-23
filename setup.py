@@ -20,7 +20,7 @@ setup(
         "spead2>=1.8.0",       # Needed for async iteration
         "katsdptelstate",
         "katsdpservices",
-        "katdal",
+        "katdal[s3credentials]",
         "attrs",
         "aiomonitor",
         "numpy"
