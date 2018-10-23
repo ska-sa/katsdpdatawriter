@@ -123,8 +123,13 @@ class FlagWriterServer(DeviceServer):
         return self._capture_block_state.get(capture_block_id, None)
 
     def _get_capture_stream_name(self, capture_block_id: str) -> str:
-        """Gets the capture-stream name of the output stream"""
+        """Get the capture-stream name of the output stream"""
         return "{}_{}".format(capture_block_id, self._output_name)
+
+    def _get_prefix(self, capture_block_id: str) -> str:
+        """Get the prefix (aka bucket name) to use with the chunk store"""
+        # S3 doesn't allow underscores in bucket names
+        return self._get_capture_stream_name(capture_block_id).replace('_', '-')
 
     def rechunker_group(self, cbid: str) -> Optional[RechunkerGroup]:
         extra = dict(capture_block_id=cbid)
@@ -134,9 +139,9 @@ class FlagWriterServer(DeviceServer):
             return None
 
         if cbid not in self._flag_streams:
-            prefix = self._get_capture_stream_name(cbid)
             self._flag_streams[cbid] = RechunkerGroup(
-                self._executor, self._chunk_store, self._writer.sensors, prefix, self._arrays)
+                self._executor, self._chunk_store, self._writer.sensors,
+                self._get_prefix(cbid), self._arrays)
         return self._flag_streams[cbid]
 
     async def _do_capture(self) -> None:
@@ -169,7 +174,7 @@ class FlagWriterServer(DeviceServer):
         """
         extra = dict(capture_block_id=capture_block_id)
         logger.info("Capture block %s flag capture complete.", capture_block_id, extra=extra)
-        self._chunk_store.mark_complete(self._get_capture_stream_name(capture_block_id))
+        self._chunk_store.mark_complete(self._get_prefix(capture_block_id))
         self._set_capture_block_state(capture_block_id, State.COMPLETE)
 
     async def _write_telstate_meta(self, capture_block_id: str) -> None:

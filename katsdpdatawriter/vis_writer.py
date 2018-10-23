@@ -139,8 +139,9 @@ class VisibilityWriterServer(DeviceServer):
         executor = BoundedThreadPoolExecutor(self._max_workers)
         try:
             spead_write.clear_io_sensors(self.sensors)
+            prefix = capture_stream_name.replace('_', '-')  # S3 doesn't allow underscores
             rechunker_group = spead_write.RechunkerGroup(
-                executor, self._chunk_store, self.sensors, capture_stream_name, self._arrays)
+                executor, self._chunk_store, self.sensors, prefix, self._arrays)
             writer = VisibilityWriter(self.sensors, rx, rechunker_group)
             self.sensors['status'].value = Status.WAIT_DATA
 
@@ -150,7 +151,7 @@ class VisibilityWriterServer(DeviceServer):
             view = self._telstate.view(capture_stream_name)
             view.add('chunk_info', await rechunker_group.get_chunk_info(), immutable=True)
             rechunker_group = None   # Tells except block not to clean up
-            self._chunk_store.mark_complete(capture_stream_name)
+            self._chunk_store.mark_complete(prefix)
             self.sensors['status'].value = Status.COMPLETE
         except Exception:
             logger.exception('Exception in capture task')
