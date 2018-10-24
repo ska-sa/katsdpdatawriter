@@ -113,7 +113,8 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.assert_sensor_equals('capture-block-state', '{}')
         await self.stop_server()
         capture_stream = '{}_{}'.format(self.cbid, output_name)
-        assert_true(self.chunk_store.is_complete(capture_stream))
+        prefix = capture_stream.replace('_', '-')
+        assert_true(self.chunk_store.is_complete(prefix))
 
         # Validate the data written
         chunk_info = self._check_chunk_info(output_name)

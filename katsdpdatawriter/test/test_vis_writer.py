@@ -99,7 +99,8 @@ class TestVisWriterServer(BaseTestWriterServer):
         await self.client.request('capture-done')
         self.assert_sensor_equals('status', Status.IDLE)
         capture_stream = '{}_{}'.format(cbid, output_name)
-        assert_true(self.chunk_store.is_complete(capture_stream))
+        prefix = capture_stream.replace('_', '-')
+        assert_true(self.chunk_store.is_complete(prefix))
 
     async def test_new_name(self) -> None:
         # Replace the client+server to use new arguments
