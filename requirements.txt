@@ -20,6 +20,7 @@ jmespath
 katpoint==0.7
 katversion
 llvmlite
+msgpack
 netifaces
 numba
 numpy
