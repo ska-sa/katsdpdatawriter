@@ -18,6 +18,7 @@ import katsdpservices
 
 from katsdpdatawriter.flag_writer import FlagWriterServer
 from katsdpdatawriter.spead_write import add_common_args, chunk_store_from_args
+from katsdpdatawriter.dashboard import Dashboard, start_dashboard
 
 
 def on_shutdown(loop: asyncio.AbstractEventLoop, server: FlagWriterServer) -> None:
@@ -73,6 +74,9 @@ if __name__ == '__main__':
                               args.new_name if args.new_name is not None else args.flags_name,
                               args.rename_src, args.s3_endpoint_url,
                               args.workers)
+    if args.dashboard:
+        dashboard = Dashboard(server.sensors)
+        start_dashboard(dashboard, args.dashboard_port)
 
     if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop,

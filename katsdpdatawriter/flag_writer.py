@@ -2,6 +2,7 @@ import logging
 import enum
 import json
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
@@ -18,7 +19,6 @@ from katsdptelstate.endpoint import Endpoint
 import katsdpdatawriter
 from . import spead_write
 from .spead_write import RechunkerGroup
-from .bounded_executor import BoundedThreadPoolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,8 @@ class FlagWriterServer(DeviceServer):
         self._output_name = output_name
         # rechunker group for each CBID
         self._flag_streams = {}          # type: Dict[str, RechunkerGroup]
-        self._executor = BoundedThreadPoolExecutor(max_workers=max_workers)
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._executor_semaphore = asyncio.BoundedSemaphore(max_workers + 1, loop=self.loop)
 
         self.sensors.add(Sensor(
             Status, "status", "The current status of the flag writer process."))
@@ -136,7 +137,8 @@ class FlagWriterServer(DeviceServer):
         if cbid not in self._flag_streams:
             prefix = self._get_capture_stream_name(cbid)
             self._flag_streams[cbid] = RechunkerGroup(
-                self._executor, self._chunk_store, self._writer.sensors, prefix, self._arrays)
+                self._executor, self._executor_semaphore,
+                self._chunk_store, self._writer.sensors, prefix, self._arrays)
         return self._flag_streams[cbid]
 
     async def _do_capture(self) -> None:

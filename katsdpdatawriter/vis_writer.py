@@ -38,6 +38,7 @@ The following useful object parameters are stored in telstate:
 import asyncio
 import logging
 import enum
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Tuple, Dict, Any, Optional, Mapping   # noqa: F401
 
 import numpy as np
@@ -52,7 +53,6 @@ import spead2.recv.asyncio
 
 import katsdpdatawriter
 from . import spead_write
-from .bounded_executor import BoundedThreadPoolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -136,11 +136,13 @@ class VisibilityWriterServer(DeviceServer):
         """Capture data for a single capture block"""
         writer = None
         rechunker_group = None
-        executor = BoundedThreadPoolExecutor(self._max_workers)
+        executor = ThreadPoolExecutor(self._max_workers)
+        executor_semaphore = asyncio.BoundedSemaphore(self._max_workers + 1, loop=self.loop)
         try:
             spead_write.clear_io_sensors(self.sensors)
             rechunker_group = spead_write.RechunkerGroup(
-                executor, self._chunk_store, self.sensors, capture_stream_name, self._arrays)
+                executor, executor_semaphore,
+                self._chunk_store, self.sensors, capture_stream_name, self._arrays)
             writer = VisibilityWriter(self.sensors, rx, rechunker_group)
             self.sensors['status'].value = Status.WAIT_DATA
 

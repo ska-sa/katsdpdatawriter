@@ -2,7 +2,8 @@ from unittest import mock
 from typing import List, Tuple   # noqa: F401
 
 import numpy as np
-from nose.tools import assert_equal, assert_raises
+from nose.tools import assert_equal, assert_raises, nottest
+import asynctest
 
 from .. import rechunk
 from ..rechunk import Chunks, Offset   # noqa: F401
@@ -45,20 +46,21 @@ class MockRechunker(rechunk.Rechunker):
         super().__init__(*args, **kwargs)
         self.calls = []   # type: List[Tuple[Offset, np.ndarray]]
 
-    def output(self, offset: Tuple[int, ...], value: np.ndarray) -> None:
+    async def output(self, offset: Tuple[int, ...], value: np.ndarray) -> None:
         self.calls.append((offset, value.copy()))
 
 
-class BaseTestRechunker:
+@nottest
+class BaseTestRechunker(asynctest.TestCase):
     def setup_data(self, in_chunks: Chunks, out_chunks: Chunks) -> None:
         self.r = MockRechunker('flags', in_chunks, out_chunks, 253, np.uint8)
         self.data = np.arange(64).reshape(4, 8, 2).astype(np.uint8)
         self.expected = np.full_like(self.data, 253, np.uint8)
 
-    def send_chunk(self, offset: Tuple[int, ...]) -> None:
+    async def send_chunk(self, offset: Tuple[int, ...]) -> None:
         idx = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, (1, 4, 2)))
         value = self.data[idx]
-        self.r.add(offset, value)
+        await self.r.add(offset, value)
         self.expected[idx] = self.data[idx]
 
     def check_values(self) -> None:
@@ -70,34 +72,34 @@ class BaseTestRechunker:
             expected = self.expected[idx]
             np.testing.assert_array_equal(expected, call[1])
 
-    def test_add_bad_offset(self) -> None:
+    async def test_add_bad_offset(self) -> None:
         with assert_raises(KeyError):
-            self.r.add((0, 2, 0), np.zeros((1, 2, 2), np.uint8))
+            await self.r.add((0, 2, 0), np.zeros((1, 2, 2), np.uint8))
         with assert_raises(ValueError):
-            self.r.add((0, 0), np.zeros((1, 2, 2), np.uint8))
+            await self.r.add((0, 0), np.zeros((1, 2, 2), np.uint8))
 
-    def test_add_bad_shape(self) -> None:
+    async def test_add_bad_shape(self) -> None:
         with assert_raises(ValueError):
-            self.r.add((0, 0, 0), np.zeros((1, 2, 2), np.uint8))
+            await self.r.add((0, 0, 0), np.zeros((1, 2, 2), np.uint8))
         with assert_raises(ValueError):
-            self.r.add((0, 0, 0), np.zeros((2, 4, 2), np.uint8))
+            await self.r.add((0, 0, 0), np.zeros((2, 4, 2), np.uint8))
 
 
 class TestRechunker(BaseTestRechunker):
-    def setup(self) -> None:
+    def setUp(self) -> None:
         self.setup_data(((1,), (4, 4), (2,)), ((2,), (2, 2, 4), (2,)))
 
-    def test_end_partial(self, reorder: bool = False) -> None:
+    async def test_end_partial(self, reorder: bool = False) -> None:
         if reorder:
             for i in range(3):
-                self.send_chunk((i, 0, 0))
+                await self.send_chunk((i, 0, 0))
             for i in range(3):
-                self.send_chunk((i, 4, 0))
+                await self.send_chunk((i, 4, 0))
         else:
             for i in range(3):
-                self.send_chunk((i, 0, 0))
-                self.send_chunk((i, 4, 0))
-        self.r.close()
+                await self.send_chunk((i, 0, 0))
+                await self.send_chunk((i, 4, 0))
+        await self.r.close()
         offsets = [call[0] for call in self.r.calls]
         shapes = [call[1].shape for call in self.r.calls]
         assert_equal(
@@ -118,11 +120,11 @@ class TestRechunker(BaseTestRechunker):
                 'dtype': np.uint8
             })
 
-    def test_end_full(self) -> None:
+    async def test_end_full(self) -> None:
         for i in range(4):
-            self.send_chunk((i, 0, 0))
-            self.send_chunk((i, 4, 0))
-        self.r.close()
+            await self.send_chunk((i, 0, 0))
+            await self.send_chunk((i, 4, 0))
+        await self.r.close()
         offsets = [call[0] for call in self.r.calls]
         shapes = [call[1].shape for call in self.r.calls]
         assert_equal(
@@ -143,19 +145,19 @@ class TestRechunker(BaseTestRechunker):
                 'dtype': np.uint8
             })
 
-    def test_reorder(self) -> None:
-        self.test_end_partial(reorder=True)
+    async def test_reorder(self) -> None:
+        await self.test_end_partial(reorder=True)
 
-    def test_out_of_order(self) -> None:
+    async def test_out_of_order(self) -> None:
         with mock.patch.object(self.r, 'out_of_order'):
-            self.send_chunk((2, 0, 0))
-            self.send_chunk((0, 0, 0))
+            await self.send_chunk((2, 0, 0))
+            await self.send_chunk((0, 0, 0))
             self.r.out_of_order.assert_called_with(0, 2)   # type: ignore
 
-    def test_missing(self) -> None:
-        self.send_chunk((1, 0, 0))
-        self.send_chunk((2, 4, 0))
-        self.r.close()
+    async def test_missing(self) -> None:
+        await self.send_chunk((1, 0, 0))
+        await self.send_chunk((2, 4, 0))
+        await self.r.close()
 
         offsets = [call[0] for call in self.r.calls]
         shapes = [call[1].shape for call in self.r.calls]
@@ -201,14 +203,14 @@ class TestRechunker(BaseTestRechunker):
 
 
 class TestRechunkerNoAccum(BaseTestRechunker):
-    def setup(self) -> None:
+    def setUp(self) -> None:
         self.setup_data(((1,), (4, 4), (2,)), ((1,), (2, 2, 4), (2,)))
 
-    def test(self) -> None:
+    async def test(self) -> None:
         for i in range(2):
-            self.send_chunk((i, 0, 0))
-            self.send_chunk((i, 4, 0))
-        self.r.close()
+            await self.send_chunk((i, 0, 0))
+            await self.send_chunk((i, 4, 0))
+        await self.r.close()
         offsets = [call[0] for call in self.r.calls]
         shapes = [call[1].shape for call in self.r.calls]
         assert_equal(

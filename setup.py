@@ -23,7 +23,8 @@ setup(
         "katdal[s3credentials]",
         "attrs",
         "aiomonitor",
-        "numpy"
+        "numpy",
+        "bokeh"
     ],
     extras_require={"test": tests_require},
     tests_require=tests_require,

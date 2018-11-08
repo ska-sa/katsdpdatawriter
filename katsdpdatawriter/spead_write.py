@@ -89,7 +89,10 @@ def io_sensors() -> Sequence[Sensor]:
         Sensor(
             float, "output-seconds-total",
             "Accumulated time spent writing chunks. (prometheus: counter)",
-            "s")
+            "s"),
+        Sensor(
+            int, "active-chunks",
+            "Number of chunks currently being written. (prometheus: gauge)")
     ]
 
 
@@ -110,7 +113,8 @@ def clear_io_sensors(sensors: SensorSet) -> None:
                  'input-dumps-total',
                  'output-bytes-total',
                  'output-chunks-total',
-                 'output-seconds-total']:
+                 'output-seconds-total',
+                 'active-chunks']:
         sensor = sensors[name]
         sensor.set_value(sensor.stype(0), timestamp=now)
 
@@ -160,16 +164,24 @@ class ChunkStoreRechunker(rechunk.Rechunker):
     """Rechunker that outputs data to a chunk store via an executor.
 
     The name is used as the array name in the chunk store.
+
+    .. note::
+
+       The :meth`output` coroutine will return as soon as it has posted the
+       chunk to the executor. It only blocks to acquire from the
+       `executor_semaphore`.
     """
     def __init__(
             self,
             executor: concurrent.futures.Executor,
+            executor_semaphore: asyncio.Semaphore,
             chunk_store: katdal.chunkstore.ChunkStore,
             sensors: SensorSet, name: str,
             in_chunks: Chunks, out_chunks: Chunks,
             fill_value: Any, dtype: Any) -> None:
         super().__init__(name, in_chunks, out_chunks, fill_value, dtype)
         self.executor = executor
+        self.executor_semaphore = executor_semaphore
         self.chunk_store = chunk_store
         self.chunk_store.create_array(self.name)
         self.sensors = sensors
@@ -192,6 +204,8 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         logs any errors.
         """
         self._futures.remove(future)
+        self.executor_semaphore.release()
+        self.sensors['active-chunks'].value -= 1
         try:
             nbytes, elapsed = future.result()
         except asyncio.CancelledError:
@@ -204,22 +218,22 @@ class ChunkStoreRechunker(rechunk.Rechunker):
             self.sensors['output-bytes-total'].value += nbytes
             self.sensors['output-seconds-total'].value += elapsed
 
-    def output(self, offset: Offset, value: np.ndarray) -> None:
+    async def output(self, offset: Offset, value: np.ndarray) -> None:
         slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
         loop = asyncio.get_event_loop()
+        await self.executor_semaphore.acquire()
         future = asyncio.ensure_future(
             loop.run_in_executor(self.executor, self._put_chunk, slices, value))
         self._futures.add(future)
+        self.sensors['active-chunks'].value += 1
         future.add_done_callback(self._update_stats)
 
     def out_of_order(self, received: int, seen: int) -> None:
         self.sensors['input-too-old-heaps-total'].value += 1
 
-    async def wait(self) -> None:
-        """Wait for all asynchronous writes to complete.
-
-        This should be called *after* :meth:`close`.
-        """
+    async def close(self) -> None:
+        """Close and wait for all asynchronous writes to complete."""
+        await super().close()
         # asyncio.wait is implemented by adding a done callback to each
         # future. Done callbacks are run in order of addition, so when
         # wait returns, we are guaranteed that the done callbacks have
@@ -243,6 +257,9 @@ class RechunkerGroup:
     ----------
     executor
         Executor used for asynchronous writes to the chunk store.
+    executor_semaphore
+        Semaphore bounding the number of tasks that can be in flight within
+        `executor`.
     chunk_store
         Chunk-store into which output chunks are written.
     sensors
@@ -256,6 +273,7 @@ class RechunkerGroup:
     """
     def __init__(self,
                  executor: concurrent.futures.Executor,
+                 executor_semaphore: asyncio.Semaphore,
                  chunk_store: katdal.chunkstore.ChunkStore,
                  sensors: SensorSet, prefix: str,
                  arrays: Sequence[Array]) -> None:
@@ -263,12 +281,13 @@ class RechunkerGroup:
         self.arrays = list(arrays)
         self.sensors = sensors
         self._rechunkers = [
-            ChunkStoreRechunker(executor, chunk_store, sensors,
+            ChunkStoreRechunker(executor, executor_semaphore,
+                                chunk_store, sensors,
                                 chunk_store.join(prefix, a.name),
                                 a.in_chunks, a.out_chunks,
                                 a.fill_value, a.dtype) for a in arrays]
 
-    def add(self, offset_prefix: Offset, values: Iterable[np.ndarray]) -> None:
+    async def add(self, offset_prefix: Offset, values: Iterable[np.ndarray]) -> None:
         """Add a value per array for rechunking.
 
         For each array passed to the constructor, there must be corresponding
@@ -280,7 +299,7 @@ class RechunkerGroup:
             self.sensors['input-dumps-total'].value = dump_index + 1
         for rechunker, value in zip(self._rechunkers, values):
             offset = offset_prefix + (0,) * (value.ndim - len(offset_prefix))
-            rechunker.add(offset, value)
+            await rechunker.add(offset, value)
 
     async def get_chunk_info(self) -> Dict[str, Dict[str, Any]]:
         """Get the chunk information to place into telstate to describe the arrays.
@@ -289,9 +308,7 @@ class RechunkerGroup:
         further calls to :meth:`add` should be made.
         """
         for rechunker in self._rechunkers:
-            rechunker.close()
-        for rechunker in self._rechunkers:
-            await rechunker.wait()
+            await rechunker.close()
         return {array.name: rechunker.get_chunk_info(self.prefix)
                 for array, rechunker in zip(self.arrays, self._rechunkers)}
 
@@ -359,9 +376,9 @@ class SpeadWriter:
                     # Get values and add time dimension
                     values = [ig[array.name].value[np.newaxis, ...] for array in group.arrays]
                     nbytes = sum(value.nbytes for value in values)
-                    group.add((dump_index, channel0), values)
                     self.sensors['input-heaps-total'].value += 1
                     self.sensors['input-bytes-total'].value += nbytes
+                    await group.add((dump_index, channel0), values)
 
     def stop(self) -> None:
         """Gracefully stop :meth:`run`."""
@@ -532,6 +549,18 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument('--s3-secret-key', metavar='KEY',
                        help='Secret key for S3')
 
+    group = parser.add_argument_group('Instrumentation options')
+    group.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
+                       help='Disable aiomonitor debugging server')
+    group.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
+                       help='port for aiomonitor [default=%(default)s]')
+    group.add_argument('--aioconsole-port', type=int, default=aiomonitor.CONSOLE_PORT,
+                       help='port for aioconsole [default=%(default)s]')
+    group.add_argument('--no-dashboard', dest='dashboard', action='store_false',
+                       help='Disable dashboard')
+    group.add_argument('--dashboard-port', type=int, default=5006,
+                       help='port for dashboard [default=%(default)s]')
+
     parser.add_argument('--new-name', metavar='NAME',
                         help='Name for the output stream')
     parser.add_argument('--rename-src', metavar='OLD-NAME:NEW-NAME',
@@ -540,13 +569,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('--workers', type=int, default=50,
-                        help='Threads to use for writing chunks')
-    parser.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
-                        help='Disable aiomonitor debugging server')
-    parser.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
-                        help='port for aiomonitor [default=%(default)s]')
-    parser.add_argument('--aioconsole-port', type=int, default=aiomonitor.CONSOLE_PORT,
-                        help='port for aioconsole [default=%(default)s]')
+                        help='Threads to use for writing chunks [default=%(default)s]')
     parser.add_argument('-p', '--port', type=int, metavar='N',
                         help='KATCP host port [default=%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
