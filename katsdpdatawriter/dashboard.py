@@ -1,20 +1,18 @@
 """Bokeh dashboard showing real-time metrics"""
 
-import datetime
+from datetime import datetime, timedelta
 import numbers
 import logging
 import functools
 from collections import deque
 from weakref import WeakSet
-from typing import MutableMapping, Dict, List, Union, MutableSet   # noqa: F401
+from typing import MutableMapping, MutableSet, List, Callable   # noqa: F401
 
-import tornado.ioloop
-
-from aiokatcp import Sensor
+from aiokatcp import Sensor, Reading
 
 from bokeh.document import Document
 from bokeh.application.handlers.handler import Handler
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, DataRange1d
 from bokeh.layouts import gridplot
 from bokeh.plotting import figure
 from bokeh.server.server import Server
@@ -22,60 +20,113 @@ from bokeh.application.application import Application
 
 
 logger = logging.getLogger(__name__)
-Value = Union[datetime.datetime, float]
+
+
+def _convert_timestamp(posix_timestamp: float) -> datetime:
+    return datetime.utcfromtimestamp(posix_timestamp)
+
+
+class Watcher:
+    """Observe and collect data for a single sensor
+
+    Refer to :class:`Dashboard` for the meaning of `window` and `rollover`.
+    """
+    def __init__(self, dashboard: 'Dashboard', sensor: Sensor,
+                 window: float, rollover: int) -> None:
+        self.dashboard = dashboard
+        self.sensor = sensor
+        self.window = window
+        self.rollover = rollover
+        # TODO: use typing.Deque in type hint after migration to Python 3.6
+        self._readings = deque()        # type: deque
+        self.sensor.attach(self._update)
+        self._update(self.sensor, self.sensor.reading)
+
+    def close(self) -> None:
+        self.sensor.detach(self._update)
+
+    def make_data_source(self) -> ColumnDataSource:
+        data = {
+            'time': [_convert_timestamp(reading.timestamp) for reading in self._readings],
+            'value': [reading.value for reading in self._readings]
+        }
+        return ColumnDataSource(data, name='data_source ' + self.sensor.name)
+
+    def _update(self, sensor: Sensor, reading: Reading[float]) -> None:
+        self._readings.append(reading)
+        if (self._readings[-1].timestamp - self._readings[0].timestamp > self.window
+                or len(self._readings) > self.rollover):
+            self._readings.popleft()
+        update = {
+            'time': [_convert_timestamp(reading.timestamp)],
+            'value': [reading.value]
+        }
+        name = 'data_source ' + sensor.name
+
+        def doc_update(doc):
+            data_source = doc.get_model_by_name(name)
+            data_source.stream(update, rollover=len(self._readings))
+
+        self.dashboard.update_documents(doc_update)
 
 
 class Dashboard(Handler):
+    """Bokeh dashboard showing sensor values.
+
+    Sensor values are recorded and displayed through graphs. To keep the
+    graph size down (more to avoid overloading the browser/network than for
+    memory constraints), old values are discarded once either they are
+    older than `window` or there are more than `rollover` samples.
+
+    Parameters
+    ----------
+    sensors
+        Sensors to display. Non-numeric sensors are ignored.
+    window
+        Maximum length of time (in seconds) to keep samples.
+    rollover
+        Maximum number of samples to keep (per sensor).
+    """
     def __init__(self, sensors: MutableMapping[str, Sensor],
-                 rollover: int = 10000, period: float = 0.1) -> None:
+                 window: float = 1200.0, rollover: int = 10000) -> None:
         super().__init__()
-        self._sensors = []                # type: List[Sensor]
-        # TODO: use typing.Deque in type hint after migration to Python 3.6
-        self._cache = {'time': deque()}   # type: Dict[str, deque]
-        self._docs = WeakSet()            # type: MutableSet[Document]
-        self._rollover = rollover
+        self._watchers = []                # type: List[Watcher]
+        self._docs = WeakSet()             # type: MutableSet[Document]
         for sensor in sensors.values():
             if issubclass(sensor.stype, numbers.Real):
-                self._sensors.append(sensor)
-                self._cache[sensor.name] = deque()
-        self._update()
-        self._callback_handle = tornado.ioloop.PeriodicCallback(
-            self._update, 1000 * period)
-        self._callback_handle.start()
+                self._watchers.append(Watcher(self, sensor, window, rollover))
 
     def modify_document(self, doc: Document) -> None:
         plots = []
-        data = {key: list(value) for key, value in self._cache.items()}
-        data_source = ColumnDataSource(data, name='data_source')
-        for sensor in self._sensors:
-            plot = figure(title=sensor.name, plot_width=350, plot_height=350,
+        renderers = []
+        for watcher in self._watchers:
+            data_source = watcher.make_data_source()
+            plot = figure(title=watcher.sensor.name, plot_width=350, plot_height=350,
                           x_axis_label='time', x_axis_type='datetime', y_axis_label='value')
-            plot.x_range.follow = 'end'
-            plot.x_range.follow_interval = datetime.timedelta(seconds=120)
-            plot.line('time', sensor.name, source=data_source)
+            plot.step('time', 'value', source=data_source, mode='after')
             plots.append(plot)
+            renderers.extend(plot.x_range.renderers)
+        # Create a single data range so that all plots show the same time window
+        data_range = DataRange1d()
+        data_range.renderers = renderers
+        data_range.follow = 'end'
+        data_range.default_span = timedelta(seconds=1)
+        data_range.follow_interval = timedelta(seconds=120)
+        for plot in plots:
+            plot.x_range = data_range
+
         doc.add_root(gridplot(plots, ncols=3))
         logger.debug('Created document with %d plots', len(plots))
         self._docs.add(doc)
 
     def on_server_unloaded(self, server_context) -> None:
-        self._callback_handle.stop()
+        for watcher in self._watchers:
+            watcher.close()
+        self._watchers.clear()
 
-    def _update_document(self, doc: Document, row: Dict[str, List[Value]]) -> None:
-        data_source = doc.get_model_by_name('data_source')
-        data_source.stream(row, rollover=self._rollover)
-
-    def _update(self) -> None:
-        """Sample all the sensors and update the document"""
-        row = {'time': [datetime.datetime.utcnow()]}
-        for sensor in self._sensors:
-            row[sensor.name] = [sensor.value]
+    def update_documents(self, callback: Callable[[Document], None]) -> None:
         for doc in self._docs:
-            doc.add_next_tick_callback(functools.partial(self._update_document, doc, row))
-        for key, values in row.items():
-            self._cache[key].extend(values)
-            while len(self._cache[key]) > self._rollover:
-                self._cache[key].popleft()
+            doc.add_next_tick_callback(functools.partial(callback, doc))
 
 
 def start_dashboard(dashboard: Dashboard, port: int) -> None:
