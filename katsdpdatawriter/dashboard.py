@@ -98,7 +98,7 @@ class Dashboard(Handler):
 
     def modify_document(self, doc: Document) -> None:
         plots = []
-        renderers = []
+        renderers = []         # type: List
         for watcher in self._watchers:
             data_source = watcher.make_data_source()
             plot = figure(title=watcher.sensor.name, plot_width=350, plot_height=350,
