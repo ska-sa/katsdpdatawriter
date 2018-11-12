@@ -145,10 +145,10 @@ class Dashboard(Handler):
         for watchers in self._line_watchers:
             plot = figure(plot_width=350, plot_height=350,
                           x_axis_label='time', x_axis_type='datetime', y_axis_label='value')
-            for i, watcher in enumerate(watchers):
-                data_source = watcher.make_data_source()
+            for i, line_watcher in enumerate(watchers):
+                data_source = line_watcher.make_data_source()
                 plot.step('time', 'value', source=data_source, mode='after',
-                          legend=watcher.sensor.name,
+                          legend=line_watcher.sensor.name,
                           color=PALETTE[i])
             plot.legend.location = 'top_left'
             plots.append(plot)
@@ -162,10 +162,11 @@ class Dashboard(Handler):
         for plot in plots:
             plot.x_range = data_range
 
-        for watcher in self._histogram_watchers:
+        for histogram_watcher in self._histogram_watchers:
             plot = figure(plot_width=350, plot_height=350,
-                          x_axis_label='value', y_axis_label='frequency')
-            data_source = watcher.make_data_source()
+                          x_axis_label=histogram_watcher.sensor.name,
+                          y_axis_label='frequency')
+            data_source = histogram_watcher.make_data_source()
             plot.quad(top='top', bottom='bottom', left='left', right='right',
                       source=data_source)
             plots.append(plot)
@@ -176,10 +177,10 @@ class Dashboard(Handler):
 
     def on_server_unloaded(self, server_context) -> None:
         for watchers in self._line_watchers:
-            for watcher in watchers:
-                watcher.close()
-        for watcher in self._histogram_watchers:
-            watcher.close()
+            for line_watcher in watchers:
+                line_watcher.close()
+        for histogram_watcher in self._histogram_watchers:
+            histogram_watcher.close()
         self._line_watchers.clear()
         self._histogram_watchers.clear()
 
@@ -196,7 +197,7 @@ def make_dashboard(sensors: Mapping[str, Sensor]) -> Dashboard:
         [sensors['output-chunks-total']],
         [sensors['input-bytes-total'], sensors['output-bytes-total']],
         [sensors['input-heaps-total']],
-        [sensors['input-incomplete-heaps-total']]
+        [sensors['input-incomplete-heaps-total'], sensors['input-missing-heaps-total']]
     ]
     histogram_sensors = [sensors['output-seconds']]
     return Dashboard(line_sensors, histogram_sensors)

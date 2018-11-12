@@ -10,7 +10,9 @@ import enum
 import logging
 import concurrent.futures
 import asyncio
-from typing import Optional, Any, Sequence, Iterable, Mapping, Set, Dict, Tuple   # noqa: F401
+from collections import Counter
+from typing import (Optional, Any, Sequence, Iterable,           # noqa: F401
+                    Mapping, MutableMapping, Set, Dict, Tuple)
 
 import numpy as np
 import attr
@@ -70,6 +72,10 @@ def io_sensors() -> Sequence[Sensor]:
             "Number of heaps dropped because they are too late. (prometheus: counter)",
             status_func=_warn_if_positive),
         Sensor(
+            int, "input-missing-heaps-total",
+            "Number of gaps in the heaps seen. (prometheus: counter)",
+            status_func=_warn_if_positive),
+        Sensor(
             int, "input-bytes-total",
             "Number of payload bytes received in this session. (prometheus: counter)",
             "B"),
@@ -112,6 +118,7 @@ def clear_io_sensors(sensors: SensorSet) -> None:
     now = time.time()
     for name in ['input-incomplete-heaps-total',
                  'input-too-old-heaps-total',
+                 'input-missing-heaps-total',
                  'input-bytes-total',
                  'input-heaps-total',
                  'input-dumps-total',
@@ -285,6 +292,8 @@ class RechunkerGroup:
         self.prefix = prefix
         self.arrays = list(arrays)
         self.sensors = sensors
+        self._expected = Counter()    # type: MutableMapping[Offset, int]
+        self._seen = Counter()        # type: MutableMapping[Offset, int]
         self._rechunkers = [
             ChunkStoreRechunker(executor, executor_semaphore,
                                 chunk_store, sensors,
@@ -302,6 +311,17 @@ class RechunkerGroup:
         dump_index = offset_prefix[0]
         if dump_index >= self.sensors['input-dumps-total'].value:
             self.sensors['input-dumps-total'].value = dump_index + 1
+
+        # Update our idea of how many heaps we've missed out on, assuming heaps
+        # for each substream arrive in order.
+        substream = offset_prefix[1:]
+        old_missing = self._expected[substream] - self._seen[substream]
+        if dump_index >= self._expected[substream]:
+            self._expected[substream] = dump_index + 1
+        self._seen[substream] += 1
+        new_missing = self._expected[substream] - self._seen[substream]
+        self.sensors['input-missing-heaps-total'].value += new_missing - old_missing
+
         for rechunker, value in zip(self._rechunkers, values):
             offset = offset_prefix + (0,) * (value.ndim - len(offset_prefix))
             await rechunker.add(offset, value)
