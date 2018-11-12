@@ -91,6 +91,10 @@ def io_sensors() -> Sequence[Sensor]:
             "Accumulated time spent writing chunks. (prometheus: counter)",
             "s"),
         Sensor(
+            float, "output-seconds",
+            "Time spent on the last chunk write.",
+            "s"),
+        Sensor(
             int, "active-chunks",
             "Number of chunks currently being written. (prometheus: gauge)")
     ]
@@ -217,6 +221,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
             self.sensors['output-chunks-total'].value += 1
             self.sensors['output-bytes-total'].value += nbytes
             self.sensors['output-seconds-total'].value += elapsed
+            self.sensors['output-seconds'].value = elapsed
 
     async def output(self, offset: Offset, value: np.ndarray) -> None:
         slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))

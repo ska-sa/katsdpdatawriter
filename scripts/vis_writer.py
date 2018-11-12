@@ -10,7 +10,7 @@ import katsdptelstate
 
 from katsdpdatawriter.vis_writer import VisibilityWriterServer
 from katsdpdatawriter.spead_write import add_common_args, chunk_store_from_args
-from katsdpdatawriter.dashboard import Dashboard, start_dashboard
+from katsdpdatawriter.dashboard import make_dashboard, start_dashboard
 
 
 def on_shutdown(loop: asyncio.AbstractEventLoop, server: VisibilityWriterServer) -> None:
@@ -67,7 +67,7 @@ if __name__ == '__main__':
                                     args.s3_endpoint_url,
                                     args.workers)
     if args.dashboard:
-        dashboard = Dashboard(server.sensors)
+        dashboard = make_dashboard(server.sensors)
         start_dashboard(dashboard, args.dashboard_port)
 
     if args.aiomonitor:
