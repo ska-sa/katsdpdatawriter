@@ -68,7 +68,7 @@ if __name__ == '__main__':
                                     args.workers)
     if args.dashboard:
         dashboard = make_dashboard(server.sensors)
-        start_dashboard(dashboard, args.dashboard_port)
+        start_dashboard(dashboard, args)
 
     if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop,

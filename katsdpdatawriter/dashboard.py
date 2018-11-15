@@ -5,6 +5,7 @@ import logging
 import functools
 from collections import deque
 from weakref import WeakSet
+import argparse
 from typing import Mapping, MutableSet, List, Callable, Iterable   # noqa: F401
 
 import numpy as np
@@ -203,8 +204,16 @@ def make_dashboard(sensors: Mapping[str, Sensor]) -> Dashboard:
     return Dashboard(line_sensors, histogram_sensors)
 
 
-def start_dashboard(dashboard: Dashboard, port: int) -> None:
+def start_dashboard(dashboard: Dashboard, args: argparse.Namespace) -> None:
     app = Application()
     app.add(dashboard)
-    server = Server(app, port=port)
+    if args.dashboard_allow_websocket_origin:
+        allow_websocket_origin = args.dashboard_allow_websocket_origin
+    else:
+        allow_websocket_origin = [
+            'localhost:{}'.format(args.dashboard_port),
+            '{}:{}'.format(args.external_hostname, args.dashboard_port)
+        ]
+    server = Server(app, port=args.dashboard_port,
+                    allow_websocket_origin=allow_websocket_origin)
     server.start()

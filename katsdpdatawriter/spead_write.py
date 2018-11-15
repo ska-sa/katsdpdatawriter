@@ -10,6 +10,7 @@ import enum
 import logging
 import concurrent.futures
 import asyncio
+import socket
 from collections import Counter
 from typing import (Optional, Any, Sequence, Iterable,           # noqa: F401
                     Mapping, MutableMapping, Set, Dict, Tuple)
@@ -577,14 +578,21 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group('Instrumentation options')
     group.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
                        help='Disable aiomonitor debugging server')
-    group.add_argument('--aiomonitor-port', type=int, default=aiomonitor.MONITOR_PORT,
-                       help='port for aiomonitor [default=%(default)s]')
-    group.add_argument('--aioconsole-port', type=int, default=aiomonitor.CONSOLE_PORT,
-                       help='port for aioconsole [default=%(default)s]')
+    group.add_argument('--aiomonitor-port', type=int,
+                       default=aiomonitor.MONITOR_PORT, metavar='PORT',
+                       help='Port for aiomonitor [%(default)s]')
+    group.add_argument('--aioconsole-port', type=int,
+                       default=aiomonitor.CONSOLE_PORT, metavar='PORT',
+                       help='Port for aioconsole [%(default)s]')
     group.add_argument('--no-dashboard', dest='dashboard', action='store_false',
                        help='Disable dashboard')
-    group.add_argument('--dashboard-port', type=int, default=5006,
-                       help='port for dashboard [default=%(default)s]')
+    group.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
+                       help='Port for dashboard [(default)s]')
+    group.add_argument('--external-hostname', default=socket.getfqdn(), metavar='HOSTNAME',
+                       help='Hostname through which the dashboard will be accessed [%(default)s]')
+    group.add_argument('--dashboard-allow-websocket-origin', action='append', metavar='ORIGIN',
+                       help='Origin at which the dashboard may be accessed'
+                       ' (may be repeated) [auto]')
 
     parser.add_argument('--new-name', metavar='NAME',
                         help='Name for the output stream')
