@@ -155,7 +155,13 @@ class TestChunkStoreFromArgs:
         with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
             chunk_store_from_args(self.parser, self.parser.parse_args(
                 ['--npy-path=/']))
-        m.assert_called_with('/')
+        m.assert_called_with('/', direct_write=False)
+
+    def test_npy_direct_write(self, error):
+        with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--npy-path=/', '--direct-write']))
+        m.assert_called_with('/', direct_write=True)
 
     def test_s3(self, error):
         with mock.patch('katdal.chunkstore_s3.S3ChunkStore.from_url') as m:
