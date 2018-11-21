@@ -584,10 +584,8 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument('--aioconsole-port', type=int,
                        default=aiomonitor.CONSOLE_PORT, metavar='PORT',
                        help='Port for aioconsole [%(default)s]')
-    group.add_argument('--no-dashboard', dest='dashboard', action='store_false',
-                       help='Disable dashboard')
-    group.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
-                       help='Port for dashboard [(default)s]')
+    group.add_argument('--dashboard-port', type=int, metavar='PORT',
+                       help='Port for dashboard [disabled]')
     group.add_argument('--external-hostname', default=socket.getfqdn(), metavar='HOSTNAME',
                        help='Hostname through which the dashboard will be accessed [%(default)s]')
     group.add_argument('--dashboard-allow-websocket-origin', action='append', metavar='ORIGIN',

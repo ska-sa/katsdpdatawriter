@@ -66,7 +66,7 @@ if __name__ == '__main__':
                                     args.rename_src,
                                     args.s3_endpoint_url,
                                     args.workers)
-    if args.dashboard:
+    if args.dashboard_port is not None:
         dashboard = make_dashboard(server.sensors)
         start_dashboard(dashboard, args)
 
