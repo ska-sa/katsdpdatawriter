@@ -29,7 +29,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
             chunk_store=self.chunk_store, chunk_size=self.chunk_size,
             telstate=self.telstate.root(),
             input_name='sdp_l1_flags', output_name='sdp_l1_flags', rename_src={},
-            s3_endpoint_url=None, max_workers=4)
+            s3_endpoint_url=None, max_workers=4, buffer_dumps=2)
         args.update(arg_overrides)
         server = FlagWriterServer(**args)
         await server.start()

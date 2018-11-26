@@ -12,6 +12,7 @@ from katdal.chunkstore import ChunkStore
 from ..spead_write import (Array, RechunkerGroup, io_sensors,
                            add_common_args, chunk_store_from_args)
 from ..rechunk import Offset
+from ..queue_space import QueueSpace
 
 
 class TestArray:
@@ -66,8 +67,8 @@ class TestRechunkerGroup(asynctest.TestCase):
         self.weights_channel = np.arange(16).reshape(2, 8).astype(np.float32)
 
         self.executor = ThreadPoolExecutor(4)
-        self.executor_semaphore = asyncio.BoundedSemaphore(5)
-        self.r = RechunkerGroup(self.executor, self.executor_semaphore,
+        self.executor_queue_space = QueueSpace(5 * sum(array.nbytes for array in self.arrays))
+        self.r = RechunkerGroup(self.executor, self.executor_queue_space,
                                 self.chunk_store, self.sensors, 'prefix', self.arrays)
 
     def tearDown(self):

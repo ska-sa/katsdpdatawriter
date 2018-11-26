@@ -30,6 +30,7 @@ from katsdptelstate.endpoint import Endpoint
 
 from . import rechunk
 from .rechunk import Chunks, Offset
+from .queue_space import QueueSpace
 
 
 logger = logging.getLogger(__name__)
@@ -190,19 +191,19 @@ class ChunkStoreRechunker(rechunk.Rechunker):
 
        The :meth`output` coroutine will return as soon as it has posted the
        chunk to the executor. It only blocks to acquire from the
-       `executor_semaphore`.
+       `executor_queue_space`.
     """
     def __init__(
             self,
             executor: concurrent.futures.Executor,
-            executor_semaphore: asyncio.Semaphore,
+            executor_queue_space: QueueSpace,
             chunk_store: katdal.chunkstore.ChunkStore,
             sensors: SensorSet, name: str,
             in_chunks: Chunks, out_chunks: Chunks,
             fill_value: Any, dtype: Any) -> None:
         super().__init__(name, in_chunks, out_chunks, fill_value, dtype)
         self.executor = executor
-        self.executor_semaphore = executor_semaphore
+        self.executor_queue_space = executor_queue_space
         self.chunk_store = chunk_store
         self.chunk_store.create_array(self.name)
         self.sensors = sensors
@@ -225,7 +226,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         logs any errors.
         """
         self._futures.remove(future)
-        self.executor_semaphore.release()
+        self.executor_queue_space.release(nbytes)
         self.sensors['active-chunks'].value -= 1
         self.sensors['queued-bytes'].value -= nbytes
         try:
@@ -244,7 +245,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
     async def output(self, offset: Offset, value: np.ndarray) -> None:
         slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
         loop = asyncio.get_event_loop()
-        await self.executor_semaphore.acquire()
+        await self.executor_queue_space.acquire(value.nbytes)
         future = asyncio.ensure_future(
             loop.run_in_executor(self.executor, self._put_chunk, slices, value))
         self._futures.add(future)
@@ -280,9 +281,9 @@ class RechunkerGroup:
     ----------
     executor
         Executor used for asynchronous writes to the chunk store.
-    executor_semaphore
-        Semaphore bounding the number of tasks that can be in flight within
-        `executor`.
+    executor_queue_space
+        :class:`QueueSpace` bounding the number of bytes that can be in flight
+        within `executor`.
     chunk_store
         Chunk-store into which output chunks are written.
     sensors
@@ -296,7 +297,7 @@ class RechunkerGroup:
     """
     def __init__(self,
                  executor: concurrent.futures.Executor,
-                 executor_semaphore: asyncio.Semaphore,
+                 executor_queue_space: QueueSpace,
                  chunk_store: katdal.chunkstore.ChunkStore,
                  sensors: SensorSet, prefix: str,
                  arrays: Sequence[Array]) -> None:
@@ -306,7 +307,7 @@ class RechunkerGroup:
         self._expected = Counter()    # type: MutableMapping[Offset, int]
         self._seen = Counter()        # type: MutableMapping[Offset, int]
         self._rechunkers = [
-            ChunkStoreRechunker(executor, executor_semaphore,
+            ChunkStoreRechunker(executor, executor_queue_space,
                                 chunk_store, sensors,
                                 chunk_store.join(prefix, a.name),
                                 a.in_chunks, a.out_chunks,
@@ -484,7 +485,7 @@ def make_receiver(endpoints: Sequence[Endpoint],
                   interface_address: Optional[str],
                   ibv: bool,
                   max_heaps_per_substream: int = 2,
-                  ring_heaps_per_substream: int = 8):
+                  ring_heaps_per_substream: int = 2):
     """Generate a SPEAD receiver suitable for :class:`SpeadWriter`.
 
     Parameters
@@ -616,6 +617,8 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                         help='Target object size in MB [default=%(default)s]')
     parser.add_argument('--workers', type=int, default=50,
                         help='Threads to use for writing chunks [default=%(default)s]')
+    parser.add_argument('--buffer-dumps', type=int, default=20, metavar='DUMPS',
+                        help='Number of full dumps to buffer in write queue')
     parser.add_argument('-p', '--port', type=int, metavar='N',
                         help='KATCP host port [default=%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
