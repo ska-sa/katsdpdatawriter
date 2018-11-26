@@ -1,5 +1,4 @@
 import argparse
-import asyncio
 from unittest import mock
 from concurrent.futures import ThreadPoolExecutor
 

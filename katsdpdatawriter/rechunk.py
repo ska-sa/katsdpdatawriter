@@ -229,7 +229,8 @@ class Rechunker:
         """Add a new incoming chunk.
 
         The `value` is guaranteed to be copied, so it is safe for the caller
-        to update it after the recall returns.
+        to update it after the call returns (which means the coroutine
+        *completing*, not just yielding).
 
         Parameters
         ----------

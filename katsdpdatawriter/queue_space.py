@@ -14,7 +14,7 @@ class QueueSpace:
     def __init__(self, value: int = 0, *, loop: asyncio.AbstractEventLoop = None) -> None:
         self._loop = loop if loop is not None else asyncio.get_event_loop()
         self._value = value
-        self._waiters = deque()
+        self._waiters = deque()      # type: deque
 
     async def acquire(self, value: int) -> bool:
         if value <= self._value:

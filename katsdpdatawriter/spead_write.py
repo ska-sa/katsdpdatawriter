@@ -207,9 +207,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         self.chunk_store = chunk_store
         self.chunk_store.create_array(self.name)
         self.sensors = sensors
-        self._futures = set()    # type: Set[asyncio.Future[Tuple[int, float]]]
+        self._futures = set()    # type: Set[asyncio.Future[float]]
 
-    def _put_chunk(self, slices: Tuple[slice, ...], value: np.ndarray) -> Tuple[int, float]:
+    def _put_chunk(self, slices: Tuple[slice, ...], value: np.ndarray) -> float:
         """Put a chunk into the chunk store and return statistics.
 
         This is run in a separate thread, using an executor.
@@ -219,7 +219,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         end = time.monotonic()
         return end - start
 
-    def _update_stats(self, nbytes: int, future: 'asyncio.Future[Tuple[int, float]]') -> None:
+    def _update_stats(self, nbytes: int, future: 'asyncio.Future[float]') -> None:
         """Done callback for a future running :meth:`_put_chunk`.
 
         This is run on the event loop, so can safely update sensors. It also
