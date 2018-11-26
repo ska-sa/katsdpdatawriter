@@ -11,6 +11,7 @@ import logging
 import concurrent.futures
 import asyncio
 import socket
+import functools
 from collections import Counter
 from typing import (Optional, Any, Sequence, Iterable,           # noqa: F401
                     Mapping, MutableMapping, Set, Dict, Tuple)
@@ -103,7 +104,13 @@ def io_sensors() -> Sequence[Sensor]:
             "s"),
         Sensor(
             int, "active-chunks",
-            "Number of chunks currently being written. (prometheus: gauge)")
+            "Number of chunks currently being written. (prometheus: gauge)"),
+        Sensor(
+            float, "queued-bytes",
+            "Number of bytes that have been received but not yet written. (prometheus: gauge)"),
+        Sensor(
+            float, "max-queued-bytes",
+            "Maximum value of queued-bytes sensor for this capture block. (prometheus: gauge)")
     ]
 
 
@@ -126,7 +133,9 @@ def clear_io_sensors(sensors: SensorSet) -> None:
                  'output-bytes-total',
                  'output-chunks-total',
                  'output-seconds-total',
-                 'active-chunks']:
+                 'active-chunks',
+                 'queued-bytes',
+                 'max-queued-bytes']:
         sensor = sensors[name]
         sensor.set_value(sensor.stype(0), timestamp=now)
 
@@ -207,9 +216,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         start = time.monotonic()
         self.chunk_store.put_chunk(self.name, slices, value)
         end = time.monotonic()
-        return value.nbytes, end - start
+        return end - start
 
-    def _update_stats(self, future: 'asyncio.Future[Tuple[int, float]]') -> None:
+    def _update_stats(self, nbytes: int, future: 'asyncio.Future[Tuple[int, float]]') -> None:
         """Done callback for a future running :meth:`_put_chunk`.
 
         This is run on the event loop, so can safely update sensors. It also
@@ -218,8 +227,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         self._futures.remove(future)
         self.executor_semaphore.release()
         self.sensors['active-chunks'].value -= 1
+        self.sensors['queued-bytes'].value -= nbytes
         try:
-            nbytes, elapsed = future.result()
+            elapsed = future.result()
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -239,7 +249,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
             loop.run_in_executor(self.executor, self._put_chunk, slices, value))
         self._futures.add(future)
         self.sensors['active-chunks'].value += 1
-        future.add_done_callback(self._update_stats)
+        future.add_done_callback(functools.partial(self._update_stats, value.nbytes))
 
     def out_of_order(self, received: int, seen: int) -> None:
         self.sensors['input-too-old-heaps-total'].value += 1
@@ -312,6 +322,14 @@ class RechunkerGroup:
         dump_index = offset_prefix[0]
         if dump_index >= self.sensors['input-dumps-total'].value:
             self.sensors['input-dumps-total'].value = dump_index + 1
+
+        nbytes = sum(value.nbytes for value in values)
+        self.sensors['input-heaps-total'].value += 1
+        self.sensors['input-bytes-total'].value += nbytes
+        queued_bytes = self.sensors['queued-bytes'].value + nbytes
+        self.sensors['queued-bytes'].value = queued_bytes
+        if queued_bytes > self.sensors['max-queued-bytes'].value:
+            self.sensors['max-queued-bytes'].value = queued_bytes
 
         # Update our idea of how many heaps we've missed out on, assuming heaps
         # for each substream arrive in order.
@@ -401,9 +419,6 @@ class SpeadWriter:
                 if group is not None:
                     # Get values and add time dimension
                     values = [ig[array.name].value[np.newaxis, ...] for array in group.arrays]
-                    nbytes = sum(value.nbytes for value in values)
-                    self.sensors['input-heaps-total'].value += 1
-                    self.sensors['input-bytes-total'].value += nbytes
                     await group.add((dump_index, channel0), values)
 
     def stop(self) -> None:
