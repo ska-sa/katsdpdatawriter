@@ -208,14 +208,25 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         self.chunk_store.create_array(self.name)
         self.sensors = sensors
         self._futures = set()    # type: Set[asyncio.Future[float]]
+        self._loop = asyncio.get_event_loop()
 
     def _put_chunk(self, slices: Tuple[slice, ...], value: np.ndarray) -> float:
         """Put a chunk into the chunk store and return statistics.
 
         This is run in a separate thread, using an executor.
         """
+        def increment_active_chunks():
+            self.sensors['active-chunks'].value += 1
+
+        def decrement_active_chunks():
+            self.sensors['active-chunks'].value -= 1
+
         start = time.monotonic()
-        self.chunk_store.put_chunk(self.name, slices, value)
+        self._loop.call_soon_threadsafe(increment_active_chunks)
+        try:
+            self.chunk_store.put_chunk(self.name, slices, value)
+        finally:
+            self._loop.call_soon_threadsafe(decrement_active_chunks)
         end = time.monotonic()
         return end - start
 
@@ -227,7 +238,6 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         """
         self._futures.remove(future)
         self.executor_queue_space.release(nbytes)
-        self.sensors['active-chunks'].value -= 1
         self.sensors['queued-bytes'].value -= nbytes
         try:
             elapsed = future.result()
@@ -244,12 +254,10 @@ class ChunkStoreRechunker(rechunk.Rechunker):
 
     async def output(self, offset: Offset, value: np.ndarray) -> None:
         slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
-        loop = asyncio.get_event_loop()
         await self.executor_queue_space.acquire(value.nbytes)
         future = asyncio.ensure_future(
-            loop.run_in_executor(self.executor, self._put_chunk, slices, value))
+            self._loop.run_in_executor(self.executor, self._put_chunk, slices, value))
         self._futures.add(future)
-        self.sensors['active-chunks'].value += 1
         future.add_done_callback(functools.partial(self._update_stats, value.nbytes))
 
     def out_of_order(self, received: int, seen: int) -> None:
