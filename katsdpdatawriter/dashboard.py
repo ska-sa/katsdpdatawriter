@@ -194,6 +194,7 @@ def make_dashboard(sensors: Mapping[str, Sensor]) -> Dashboard:
     """Build a dashboard using a standard set of sensors"""
     line_sensors = [
         [sensors['active-chunks']],
+        [sensors['queued-bytes']],
         [sensors['output-seconds-total']],
         [sensors['output-chunks-total']],
         [sensors['input-bytes-total'], sensors['output-bytes-total']],
