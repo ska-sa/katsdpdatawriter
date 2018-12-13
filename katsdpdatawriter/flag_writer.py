@@ -2,6 +2,7 @@ import logging
 import enum
 import json
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
@@ -18,7 +19,7 @@ from katsdptelstate.endpoint import Endpoint
 import katsdpdatawriter
 from . import spead_write
 from .spead_write import RechunkerGroup
-from .bounded_executor import BoundedThreadPoolExecutor
+from .queue_space import QueueSpace
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class FlagWriterServer(DeviceServer):
                  telstate: katsdptelstate.TelescopeState,
                  input_name: str, output_name: str, rename_src: Mapping[str, str],
                  s3_endpoint_url: Optional[str],
-                 max_workers: int) -> None:
+                 max_workers: int, buffer_dumps: int) -> None:
         super().__init__(host, port, loop=loop)
 
         self._chunk_store = chunk_store
@@ -84,7 +85,7 @@ class FlagWriterServer(DeviceServer):
         self._output_name = output_name
         # rechunker group for each CBID
         self._flag_streams = {}          # type: Dict[str, RechunkerGroup]
-        self._executor = BoundedThreadPoolExecutor(max_workers=max_workers)
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
         self.sensors.add(Sensor(
             Status, "status", "The current status of the flag writer process."))
@@ -102,6 +103,8 @@ class FlagWriterServer(DeviceServer):
         self._arrays = [
             spead_write.make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size)
         ]
+        dump_size = sum(array.nbytes for array in self._arrays)
+        self._executor_queue_space = QueueSpace(buffer_dumps * dump_size, loop=self.loop)
         spead_write.write_telstate(telstate, input_name, output_name, rename_src, s3_endpoint_url)
 
         rx = spead_write.make_receiver(
@@ -140,8 +143,8 @@ class FlagWriterServer(DeviceServer):
 
         if cbid not in self._flag_streams:
             self._flag_streams[cbid] = RechunkerGroup(
-                self._executor, self._chunk_store, self._writer.sensors,
-                self._get_prefix(cbid), self._arrays)
+                self._executor, self._executor_queue_space,
+                self._chunk_store, self._writer.sensors, self._get_prefix(cbid), self._arrays)
         return self._flag_streams[cbid]
 
     async def _do_capture(self) -> None:

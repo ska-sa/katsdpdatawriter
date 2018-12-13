@@ -115,6 +115,12 @@ class Rechunker:
     Do not instantiate this class directly. Instead, subclass it and implement
     :meth:`output`.
 
+    .. warning::
+
+       While this class has asynchronous methods, it is not safe to use it
+       from more than one task at once i.e. wait for each async call to
+       complete before making another one.
+
     Parameters
     ----------
     name : str
@@ -189,16 +195,16 @@ class Rechunker:
         sizes = tuple(s[ofs] for ofs, s in zip(offset[1:], self._sizes))
         return (self._time_accum,) + sizes
 
-    def _flush(self, item: _Item) -> None:
+    async def _flush(self, item: _Item) -> None:
         """Send `item` to :meth:`output`."""
         slices = tuple(s[ofs] for ofs, s in zip(item.offset[1:], self._split_chunks))
         for idx in itertools.product(*slices):
             full_idx = np.index_exp[0:len(item.value)] + idx
             offset = tuple(s.start + offset for s, offset in zip(full_idx, item.offset))
-            self.output(offset, item.value[full_idx])
+            await self.output(offset, item.value[full_idx])
         item.value = None   # Allow GC to reclaim memory now
 
-    def _get_item(self, offset: Offset) -> Optional[_Item]:
+    async def _get_item(self, offset: Offset) -> Optional[_Item]:
         """Get the item that should hold the input chunk starting at `offset`.
 
         It returns ``None`` if the offset is too far in the past to be captured.
@@ -209,7 +215,7 @@ class Rechunker:
         item = self._items.get(key)
         if item is None or item.offset[0] < item_offset[0]:
             if item is not None:
-                self._flush(item)
+                await self._flush(item)
             shape = self._item_shape(offset)
             initial_value = np.full(shape, self.fill_value, self.dtype)
             item = self._Item(item_offset, initial_value)
@@ -219,11 +225,12 @@ class Rechunker:
             item = None
         return item
 
-    def add(self, offset: Offset, value: np.ndarray) -> None:
+    async def add(self, offset: Offset, value: np.ndarray) -> None:
         """Add a new incoming chunk.
 
         The `value` is guaranteed to be copied, so it is safe for the caller
-        to update it after the recall returns.
+        to update it after the call returns (which means the coroutine
+        *completing*, not just yielding).
 
         Parameters
         ----------
@@ -245,7 +252,7 @@ class Rechunker:
         if len(offset) != len(self.in_chunks):
             raise ValueError('wrong number of dimensions')
         if self._time_accum > 1:
-            item = self._get_item(offset)
+            item = await self._get_item(offset)
             if item is not None:
                 item.add(offset, value)
         else:
@@ -255,17 +262,17 @@ class Rechunker:
             if value.shape != shape:
                 raise ValueError('value has wrong shape')
             item = self._Item(offset, value)
-            self._flush(item)
+            await self._flush(item)
         self._n_dumps = max(self._n_dumps, offset[0] + 1)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Flush out any partially buffered items"""
         for item in self._items.values():
             # Truncate to last seen dump
             times = self._n_dumps - item.offset[0]
             if times < item.value.shape[0]:
                 item.value = item.value[:times]
-            self._flush(item)
+            await self._flush(item)
         self._items.clear()
 
     def _get_shape(self) -> Shape:
@@ -296,7 +303,7 @@ class Rechunker:
             'chunks': self._get_chunks()
         }
 
-    def output(self, offset: Offset, value: np.ndarray) -> None:
+    async def output(self, offset: Offset, value: np.ndarray) -> None:
         """Called with each output chunk.
 
         It is safe for the callee to save a reference to `value`: it is

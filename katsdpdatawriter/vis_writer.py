@@ -38,6 +38,7 @@ The following useful object parameters are stored in telstate:
 import asyncio
 import logging
 import enum
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Tuple, Dict, Any, Optional, Mapping   # noqa: F401
 
 import numpy as np
@@ -52,7 +53,7 @@ import spead2.recv.asyncio
 
 import katsdpdatawriter
 from . import spead_write
-from .bounded_executor import BoundedThreadPoolExecutor
+from .queue_space import QueueSpace
 
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ class VisibilityWriterServer(DeviceServer):
                  telstate: katsdptelstate.TelescopeState,
                  input_name: str, output_name: str, rename_src: Mapping[str, str],
                  s3_endpoint_url: Optional[str],
-                 max_workers: int) -> None:
+                 max_workers: int, buffer_dumps: int) -> None:
         super().__init__(host, port, loop=loop)
         self._endpoints = endpoints
         self._interface_address = katsdpservices.get_interface_address(interface)
@@ -119,6 +120,8 @@ class VisibilityWriterServer(DeviceServer):
             spead_write.make_array('weights', in_chunks, 0, np.uint8, chunk_size),
             spead_write.make_array('weights_channel', in_chunks[:2], 0, np.float32, chunk_size)
         ]
+        dump_size = sum(array.nbytes for array in self._arrays)
+        self._buffer_size = buffer_dumps * dump_size
         spead_write.write_telstate(telstate, input_name, output_name, rename_src, s3_endpoint_url)
 
         self._capture_task = None     # type: Optional[asyncio.Task]
@@ -136,12 +139,14 @@ class VisibilityWriterServer(DeviceServer):
         """Capture data for a single capture block"""
         writer = None
         rechunker_group = None
-        executor = BoundedThreadPoolExecutor(self._max_workers)
+        executor = ThreadPoolExecutor(self._max_workers)
+        executor_queue_space = QueueSpace(self._buffer_size, loop=self.loop)
         try:
             spead_write.clear_io_sensors(self.sensors)
             prefix = capture_stream_name.replace('_', '-')  # S3 doesn't allow underscores
             rechunker_group = spead_write.RechunkerGroup(
-                executor, self._chunk_store, self.sensors, prefix, self._arrays)
+                executor, executor_queue_space,
+                self._chunk_store, self.sensors, prefix, self._arrays)
             writer = VisibilityWriter(self.sensors, rx, rechunker_group)
             self.sensors['status'].value = Status.WAIT_DATA
 

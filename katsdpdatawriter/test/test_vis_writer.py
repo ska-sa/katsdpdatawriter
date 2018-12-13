@@ -22,7 +22,7 @@ class TestVisWriterServer(BaseTestWriterServer):
             interface='lo', ibv=False, chunk_store=self.chunk_store, chunk_size=10000,
             telstate=self.telstate.root(),
             input_name='sdp_l0', output_name='sdp_l0', rename_src={},
-            s3_endpoint_url=None, max_workers=4)
+            s3_endpoint_url=None, max_workers=4, buffer_dumps=2)
         args.update(arg_overrides)
         server = VisibilityWriterServer(**args)
         await server.start()

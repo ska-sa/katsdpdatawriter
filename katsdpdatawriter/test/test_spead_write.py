@@ -1,5 +1,6 @@
 import argparse
 from unittest import mock
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from nose.tools import assert_equal, assert_count_equal, assert_is_instance, assert_raises
@@ -10,7 +11,7 @@ from katdal.chunkstore import ChunkStore
 from ..spead_write import (Array, RechunkerGroup, io_sensors,
                            add_common_args, chunk_store_from_args)
 from ..rechunk import Offset
-from ..bounded_executor import BoundedThreadPoolExecutor
+from ..queue_space import QueueSpace
 
 
 class TestArray:
@@ -64,23 +65,24 @@ class TestRechunkerGroup(asynctest.TestCase):
         self.weights = np.arange(32).reshape(2, 8, 2).astype(np.uint8)
         self.weights_channel = np.arange(16).reshape(2, 8).astype(np.float32)
 
-        self.executor = BoundedThreadPoolExecutor(4)
-        self.r = RechunkerGroup(self.executor, self.chunk_store,
-                                self.sensors, 'prefix', self.arrays)
+        self.executor = ThreadPoolExecutor(4)
+        self.executor_queue_space = QueueSpace(5 * sum(array.nbytes for array in self.arrays))
+        self.r = RechunkerGroup(self.executor, self.executor_queue_space,
+                                self.chunk_store, self.sensors, 'prefix', self.arrays)
 
     def tearDown(self):
         self.executor.shutdown(wait=True)
 
-    def add_chunks(self, offset: Offset) -> None:
+    async def add_chunks(self, offset: Offset) -> None:
         slices = np.s_[offset[0]:offset[0]+1, offset[1]:offset[1]+4, :]
         weights = self.weights[slices]
         weights_channel = self.weights_channel[slices[:2]]
-        self.r.add(offset, [weights, weights_channel])
+        await self.r.add(offset, [weights, weights_channel])
 
     async def test(self) -> None:
         for i in range(0, 8, 4):
             for j in range(2):
-                self.add_chunks((j, i))
+                await self.add_chunks((j, i))
         chunk_info = await self.r.get_chunk_info()
 
         expected_calls = []
@@ -153,7 +155,13 @@ class TestChunkStoreFromArgs:
         with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
             chunk_store_from_args(self.parser, self.parser.parse_args(
                 ['--npy-path=/']))
-        m.assert_called_with('/')
+        m.assert_called_with('/', direct_write=False)
+
+    def test_npy_direct_write(self, error):
+        with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--npy-path=/', '--direct-write']))
+        m.assert_called_with('/', direct_write=True)
 
     def test_s3(self, error):
         with mock.patch('katdal.chunkstore_s3.S3ChunkStore.from_url') as m:
