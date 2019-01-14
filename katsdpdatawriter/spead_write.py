@@ -493,7 +493,7 @@ def make_receiver(endpoints: Sequence[Endpoint],
                   interface_address: Optional[str],
                   ibv: bool,
                   max_heaps_per_substream: int = 2,
-                  ring_heaps_per_substream: int = 2):
+                  ring_heaps_per_substream: int = 2) -> spead2.recv.asyncio.Stream:
     """Generate a SPEAD receiver suitable for :class:`SpeadWriter`.
 
     Parameters
@@ -527,6 +527,8 @@ def make_receiver(endpoints: Sequence[Endpoint],
     rx.set_memcpy(spead2.MEMCPY_NONTEMPORAL)
     rx.stop_on_stop_item = False
     if ibv:
+        # The main scripts check this; the assert keeps mypy happy
+        assert interface_address is not None, "Interface address is required when using ibverbs"
         endpoint_tuples = [(endpoint.host, endpoint.port) for endpoint in endpoints]
         rx.add_udp_ibv_reader(endpoint_tuples, interface_address,
                               buffer_size=64 * 1024**2)

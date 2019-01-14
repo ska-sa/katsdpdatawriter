@@ -10,6 +10,7 @@ from katsdptelstate.endpoint import Endpoint
 import aiokatcp
 import spead2
 import spead2.recv.asyncio
+import spead2.send.asyncio
 from nose.tools import assert_equal, assert_in
 
 
