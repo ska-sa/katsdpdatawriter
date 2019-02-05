@@ -145,11 +145,11 @@ def clear_io_sensors(sensors: SensorSet) -> None:
 class Array:
     """A single array being received over SPEAD. See :class:`.Rechunker` for details."""
 
-    name = attr.ib()         # Excludes the prefix
-    in_chunks = attr.ib()
-    out_chunks = attr.ib()
-    fill_value = attr.ib()
-    dtype = attr.ib(converter=_dtype_converter)
+    name = attr.ib()         # type: str # Excludes the prefix
+    in_chunks = attr.ib()    # type: Tuple[Tuple[int, ...], ...]
+    out_chunks = attr.ib()   # type: Tuple[Tuple[int, ...], ...]
+    fill_value = attr.ib()   # type: Any
+    dtype = attr.ib(converter=_dtype_converter)    # type: np.dtype
 
     @property
     def substreams(self):
@@ -164,7 +164,7 @@ class Array:
         return int(np.product(self.shape)) * self.dtype.itemsize
 
 
-def make_array(name, in_chunks: Tuple[Tuple[int]],
+def make_array(name, in_chunks: Tuple[Tuple[int, ...], ...],
                fill_value: Any, dtype: Any, chunk_size: float) -> Array:
     """Create an :class:`Array` with computed output chunk scheme.
 
@@ -175,8 +175,9 @@ def make_array(name, in_chunks: Tuple[Tuple[int]],
     # Shape of a single input chunk
     shape = tuple(c[0] for c in in_chunks)
     # Compute the decomposition of each input chunk
-    chunks = katdal.chunkstore.generate_chunks(shape, dtype, chunk_size,
-                                               dims_to_split=(0, 1), power_of_two=True)
+    chunks = katdal.chunkstore.generate_chunks(
+        shape, dtype, chunk_size,
+        dims_to_split=(0, 1), power_of_two=True)  # type: Tuple[Tuple[int, ...], ...]
     # Repeat for each input chunk
     out_chunks = tuple(outc * len(inc) for inc, outc in zip(in_chunks, chunks))
     return Array(name, in_chunks, out_chunks, fill_value, dtype)
