@@ -43,6 +43,6 @@ toolz
 tornado==5.1.1
 urllib3
 
-git+ssh://git@github.com/ska-sa/katdal#egg=katdal
+git+ssh://git@github.com/ska-sa/katdal@generate-spectral-chunks#egg=katdal
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
