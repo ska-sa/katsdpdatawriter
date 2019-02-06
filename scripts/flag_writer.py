@@ -17,7 +17,7 @@ import katsdptelstate
 import katsdpservices
 
 from katsdpdatawriter.flag_writer import FlagWriterServer
-from katsdpdatawriter.spead_write import add_common_args, chunk_store_from_args
+from katsdpdatawriter.spead_write import add_common_args, chunk_store_from_args, ChunkParams
 from katsdpdatawriter.dashboard import make_dashboard, start_dashboard
 
 
@@ -68,7 +68,7 @@ if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.flags_ibv,
-                              chunk_store, args.obj_size_mb * 1e6,
+                              chunk_store, ChunkParams.from_args(args),
                               args.telstate,
                               args.flags_name,
                               args.new_name if args.new_name is not None else args.flags_name,

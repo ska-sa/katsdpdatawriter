@@ -17,7 +17,7 @@ import katdal.chunkstore
 from katdal.chunkstore_npy import NpyFileChunkStore
 
 from ..flag_writer import FlagWriterServer, Status
-from ..spead_write import DeviceStatus
+from ..spead_write import DeviceStatus, ChunkParams
 from .test_writer import BaseTestWriterServer
 
 
@@ -26,7 +26,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
         args = dict(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
             flag_interface='lo', flags_ibv=False,
-            chunk_store=self.chunk_store, chunk_size=self.chunk_size,
+            chunk_store=self.chunk_store, chunk_params=self.chunk_params,
             telstate=self.telstate.root(),
             input_name='sdp_l1_flags', output_name='sdp_l1_flags', rename_src={},
             s3_endpoint_url=None, max_workers=4, buffer_dumps=2)
@@ -70,7 +70,8 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.telstate = self.setup_telstate('sdp_l1_flags')
         self.telstate.add('src_streams', ['sdp_l0'], immutable=True)
         self.chunk_channels = 128
-        self.chunk_size = self.telstate['n_bls'] * self.chunk_channels
+        self.chunk_params = ChunkParams(self.telstate['n_bls'] * self.chunk_channels,
+                                        self.chunk_channels)
         self.setup_sleep()
         self.setup_spead()
         self.server = await self.setup_server()

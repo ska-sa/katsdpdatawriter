@@ -70,7 +70,8 @@ class FlagWriterServer(DeviceServer):
 
     def __init__(self, host: str, port: int, loop: asyncio.AbstractEventLoop,
                  endpoints: List[Endpoint], flag_interface: Optional[str], flags_ibv: bool,
-                 chunk_store: katdal.chunkstore.ChunkStore, chunk_size: float,
+                 chunk_store: katdal.chunkstore.ChunkStore,
+                 chunk_params: spead_write.ChunkParams,
                  telstate: katsdptelstate.TelescopeState,
                  input_name: str, output_name: str, rename_src: Mapping[str, str],
                  s3_endpoint_url: Optional[str],
@@ -101,7 +102,7 @@ class FlagWriterServer(DeviceServer):
         in_chunks = spead_write.chunks_from_telstate(telstate_input)
         DATA_LOST = 1 << FLAG_NAMES.index('data_lost')
         self._arrays = [
-            spead_write.make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_size)
+            spead_write.make_array('flags', in_chunks, DATA_LOST, np.uint8, chunk_params)
         ]
         dump_size = sum(array.nbytes for array in self._arrays)
         self._executor_queue_space = QueueSpace(buffer_dumps * dump_size, loop=self.loop)

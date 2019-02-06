@@ -11,7 +11,7 @@ from aiokatcp import FailReply, Sensor
 from nose.tools import assert_equal, assert_raises_regex, assert_true, assert_in
 
 from ..vis_writer import VisibilityWriterServer, Status
-from ..spead_write import DeviceStatus
+from ..spead_write import DeviceStatus, ChunkParams
 from .test_writer import BaseTestWriterServer
 
 
@@ -19,7 +19,8 @@ class TestVisWriterServer(BaseTestWriterServer):
     async def setup_server(self, **arg_overrides) -> VisibilityWriterServer:
         args = dict(
             host='127.0.0.1', port=0, loop=self.loop, endpoints=self.endpoints,
-            interface='lo', ibv=False, chunk_store=self.chunk_store, chunk_size=10000,
+            interface='lo', ibv=False, chunk_store=self.chunk_store,
+            chunk_params=ChunkParams(10000),
             telstate=self.telstate.root(),
             input_name='sdp_l0', output_name='sdp_l0', rename_src={},
             s3_endpoint_url=None, max_workers=4, buffer_dumps=2)

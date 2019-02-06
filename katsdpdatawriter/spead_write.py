@@ -36,6 +36,18 @@ from .queue_space import QueueSpace
 logger = logging.getLogger(__name__)
 
 
+@attr.s
+class ChunkParams:
+    max_size = attr.ib()                    # type: int     # maximum size in bytes
+    max_channels = attr.ib(default=None)    # type: Optional[int]
+    max_dumps = attr.ib(default=None)       # type: Optional[int]
+
+    @staticmethod
+    def from_args(args: argparse.Namespace):
+        """Create from command-line arguments (see :func:`add_common_args`)"""
+        return ChunkParams(args.obj_size_mb * 1e6, args.obj_max_channels, args.obj_max_dumps)
+
+
 # TODO: move this into aiokatcp
 class DeviceStatus(enum.Enum):
     """Standard katcp device status"""
@@ -165,19 +177,33 @@ class Array:
 
 
 def make_array(name, in_chunks: Tuple[Tuple[int, ...], ...],
-               fill_value: Any, dtype: Any, chunk_size: float) -> Array:
+               fill_value: Any, dtype: Any, chunk_params: ChunkParams) -> Array:
     """Create an :class:`Array` with computed output chunk scheme.
 
     The output chunks are determined by splitting the input chunks along axes 0
-    and 1 (time and frequency in typical use) to produce chunks of
-    approximately `chunk_size` bytes.
+    and 1 (time and frequency in typical use) to produce chunks subject to the
+    constraints of `chunk_params`.
     """
     # Shape of a single input chunk
+    assert in_chunks[0] == (1,)     # Only one chunk in time, with one dump
     shape = tuple(c[0] for c in in_chunks)
+    if chunk_params.max_channels is not None:
+        max_chunk_sizes = {1: chunk_params.max_channels}
+    else:
+        max_chunk_sizes = {}
     # Compute the decomposition of each input chunk
     chunks = katdal.chunkstore.generate_chunks(
-        shape, dtype, chunk_size,
-        dims_to_split=(0, 1), power_of_two=True)  # type: Tuple[Tuple[int, ...], ...]
+        shape, dtype, chunk_params.max_size,
+        dims_to_split=(0, 1), power_of_two=True,
+        max_chunk_sizes=max_chunk_sizes)  # type: Tuple[Tuple[int, ...], ...]
+    # Accumulate in time to make up the chunk size
+    chunk_size = np.dtype(dtype).itemsize * np.prod([c[0] for c in chunks])
+    n_time = 1
+    while (chunk_size * n_time * 2 <= chunk_params.max_size
+           and (chunk_params.max_dumps is None or n_time * 2 <= chunk_params.max_dumps)):
+        n_time *= 2
+    # the ignore is to suppress see https://github.com/python/mypy/issues/6337
+    chunks = ((n_time,),) + chunks[1:]   # type: ignore
     # Repeat for each input chunk
     out_chunks = tuple(outc * len(inc) for inc, outc in zip(in_chunks, chunks))
     return Array(name, in_chunks, out_chunks, fill_value, dtype)
@@ -627,15 +653,19 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                         type=_split_colon, action=_DictAction,
                         help='Rewrite src_streams for new name (repeat for each rename)')
     parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
-                        help='Target object size in MB [default=%(default)s]')
+                        help='Target object size in MB [%(default)s]')
+    parser.add_argument('--obj-max-channels', type=int, metavar='CHANNELS',
+                        help='Maximum number of channels per object [no limit]')
+    parser.add_argument('--obj-max-dumps', type=int, metavar='DUMPS', default=64,
+                        help='Maximum number of dumps per object [%(default)s]')
     parser.add_argument('--workers', type=int, default=50,
-                        help='Threads to use for writing chunks [default=%(default)s]')
+                        help='Threads to use for writing chunks [%(default)s]')
     parser.add_argument('--buffer-dumps', type=int, default=20, metavar='DUMPS',
                         help='Number of full dumps to buffer in write queue')
     parser.add_argument('-p', '--port', type=int, metavar='N',
-                        help='KATCP host port [default=%(default)s]')
+                        help='KATCP host port [%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
-                        help='KATCP host address [default=all hosts]')
+                        help='KATCP host address [all hosts]')
 
 
 def chunk_store_from_args(parser: argparse.ArgumentParser,
