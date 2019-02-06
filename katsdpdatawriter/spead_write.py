@@ -188,14 +188,14 @@ def make_array(name, in_chunks: Tuple[Tuple[int, ...], ...],
     assert in_chunks[0] == (1,)     # Only one chunk in time, with one dump
     shape = tuple(c[0] for c in in_chunks)
     if chunk_params.max_channels is not None:
-        max_chunk_sizes = {1: chunk_params.max_channels}
+        max_dim_elements = {1: chunk_params.max_channels}
     else:
-        max_chunk_sizes = {}
+        max_dim_elements = {}
     # Compute the decomposition of each input chunk
     chunks = katdal.chunkstore.generate_chunks(
         shape, dtype, chunk_params.max_size,
         dims_to_split=(0, 1), power_of_two=True,
-        max_chunk_sizes=max_chunk_sizes)  # type: Tuple[Tuple[int, ...], ...]
+        max_dim_elements=max_dim_elements)  # type: Tuple[Tuple[int, ...], ...]
     # Accumulate in time to make up the chunk size
     chunk_size = np.dtype(dtype).itemsize * np.prod([c[0] for c in chunks])
     n_time = 1
