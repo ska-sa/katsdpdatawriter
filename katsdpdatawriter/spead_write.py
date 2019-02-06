@@ -199,11 +199,14 @@ def make_array(name, in_chunks: Tuple[Tuple[int, ...], ...],
     # Accumulate in time to make up the chunk size
     chunk_size = np.dtype(dtype).itemsize * np.prod([c[0] for c in chunks])
     n_time = 1
-    while (chunk_size * n_time * 2 <= chunk_params.max_size
+    while (chunk_size * 2 <= chunk_params.max_size
            and (chunk_params.max_dumps is None or n_time * 2 <= chunk_params.max_dumps)):
         n_time *= 2
+        chunk_size *= 2
     # the ignore is to suppress see https://github.com/python/mypy/issues/6337
     chunks = ((n_time,),) + chunks[1:]   # type: ignore
+    logger.info('Using chunks of shape %s (%.3fMB) for %s',
+                tuple(c[0] for c in chunks), chunk_size / 1e6, name)
     # Repeat for each input chunk
     out_chunks = tuple(outc * len(inc) for inc, outc in zip(in_chunks, chunks))
     return Array(name, in_chunks, out_chunks, fill_value, dtype)
