@@ -45,7 +45,11 @@ class ChunkParams:
     @staticmethod
     def from_args(args: argparse.Namespace):
         """Create from command-line arguments (see :func:`add_common_args`)"""
-        return ChunkParams(args.obj_size_mb * 1e6, args.obj_max_channels, args.obj_max_dumps)
+        if args.buffer_dumps < args.obj_max_dumps:
+            logger.warning('Decreasing --obj-max-dumps to match --buffer-dumps (%d)',
+                           args.buffer_dumps)
+        max_dumps = min(args.obj_max_dumps, args.buffer_dumps)
+        return ChunkParams(args.obj_size_mb * 1e6, args.obj_max_channels, max_dumps)
 
 
 # TODO: move this into aiokatcp
@@ -661,7 +665,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                         help='Target object size in MB [%(default)s]')
     parser.add_argument('--obj-max-channels', type=int, metavar='CHANNELS',
                         help='Maximum number of channels per object [no limit]')
-    parser.add_argument('--obj-max-dumps', type=int, metavar='DUMPS', default=64,
+    parser.add_argument('--obj-max-dumps', type=int, metavar='DUMPS', default=16,
                         help='Maximum number of dumps per object [%(default)s]')
     parser.add_argument('--workers', type=int, default=50,
                         help='Threads to use for writing chunks [%(default)s]')
