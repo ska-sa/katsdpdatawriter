@@ -169,10 +169,12 @@ class Array:
 
     @property
     def shape(self):
+        """Shape of a single input dump"""
         return tuple(sum(c) for c in self.in_chunks)
 
     @property
     def nbytes(self):
+        """Number of bytes in a single input dump"""
         return int(np.product(self.shape)) * self.dtype.itemsize
 
 
