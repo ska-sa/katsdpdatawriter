@@ -225,7 +225,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
 
     .. note::
 
-       The :meth`output` coroutine will return as soon as it has posted the
+       The :meth:`output` coroutine will return as soon as it has posted the
        chunk to the executor. It only blocks to acquire from the
        `executor_queue_space`.
     """
