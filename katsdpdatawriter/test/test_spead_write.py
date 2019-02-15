@@ -111,13 +111,13 @@ class TestRechunkerGroup(asynctest.TestCase):
                     'prefix': 'prefix',
                     'chunks': ((1, 1), (2, 2, 2, 2), (2,)),
                     'shape': (2, 8, 2),
-                    'dtype': np.uint8
+                    'dtype': '|u1'
                 },
                 'weights_channel': {
                     'prefix': 'prefix',
                     'chunks': ((2,), (2, 2, 2, 2)),
                     'shape': (2, 8),
-                    'dtype': np.float32
+                    'dtype': '<f4'      # TODO: assumes little-endian hardware
                 }
             })
 

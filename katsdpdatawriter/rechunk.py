@@ -298,7 +298,7 @@ class Rechunker:
         """
         return {
             'prefix': prefix,
-            'dtype': self.dtype,
+            'dtype': np.lib.format.dtype_to_descr(self.dtype),
             'shape': self._get_shape(),
             'chunks': self._get_chunks()
         }
