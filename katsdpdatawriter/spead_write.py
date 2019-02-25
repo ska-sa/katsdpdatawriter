@@ -661,7 +661,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--rename-src', metavar='OLD-NAME:NEW-NAME',
                         type=_split_colon, action=_DictAction,
                         help='Rewrite src_streams for new name (repeat for each rename)')
-    parser.add_argument('--obj-size-mb', type=float, default=10., metavar='MB',
+    parser.add_argument('--obj-size-mb', type=float, default=20., metavar='MB',
                         help='Target object size in MB [%(default)s]')
     parser.add_argument('--obj-max-channels', type=int, metavar='CHANNELS',
                         help='Maximum number of channels per object [no limit]')
