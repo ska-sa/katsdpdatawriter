@@ -636,7 +636,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                        help='Access key for S3')
     group.add_argument('--s3-secret-key', metavar='KEY',
                        help='Secret key for S3')
-    group.add_argument('--s3-expire', metavar='DAYS',
+    group.add_argument('--s3-expire', type=int, metavar='DAYS',
                        help='Days after which to expire the data')
     group.add_argument('--direct-write', action='store_true',
                        help='Use O_DIRECT for writing to .npy files')

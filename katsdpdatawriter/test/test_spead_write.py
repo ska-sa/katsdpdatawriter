@@ -168,7 +168,15 @@ class TestChunkStoreFromArgs:
             chunk_store_from_args(self.parser, self.parser.parse_args(
                 ['--s3-endpoint-url=https://s3.invalid',
                  '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS']))
-        m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'))
+        m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'), expiry_days=0)
+
+    def test_s3_expire(self, error):
+        with mock.patch('katdal.chunkstore_s3.S3ChunkStore.from_url') as m:
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--s3-endpoint-url=https://s3.invalid',
+                 '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS',
+                 '--s3-expire=7']))
+        m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'), expiry_days=7)
 
     def test_rename_src(self, error):
         args = self.parser.parse_args([
