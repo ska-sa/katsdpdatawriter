@@ -636,7 +636,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                        help='Access key for S3')
     group.add_argument('--s3-secret-key', metavar='KEY',
                        help='Secret key for S3')
-    group.add_argument('--s3-expire', type=int, metavar='DAYS',
+    group.add_argument('--s3-expiry-days', type=int, metavar='DAYS',
                        help='Days after which to expire the data')
     group.add_argument('--direct-write', action='store_true',
                        help='Use O_DIRECT for writing to .npy files')
@@ -707,5 +707,5 @@ def chunk_store_from_args(parser: argparse.ArgumentParser,
         chunk_store = katdal.chunkstore_s3.S3ChunkStore.from_url(
             args.s3_endpoint_url,
             credentials=(args.s3_access_key, args.s3_secret_key),
-            expiry_days=args.s3_expire or 0)
+            expiry_days=args.s3_expiry_days or 0)
     return chunk_store
