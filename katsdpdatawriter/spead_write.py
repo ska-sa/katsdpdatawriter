@@ -24,6 +24,7 @@ import spead2.recv.asyncio
 import katdal.chunkstore
 import katdal.chunkstore_npy
 import katdal.chunkstore_s3
+import katsdpservices
 import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
 
@@ -623,7 +624,7 @@ def _split_colon(value):
     return parts
 
 
-def add_common_args(parser: argparse.ArgumentParser) -> None:
+def add_common_args(parser: katsdpservices.ArgumentParser) -> None:
     """Inject command-line arguments that are common to the writers"""
     group = parser.add_argument_group('Chunk store options')
     group.add_argument('--npy-path', metavar='PATH',

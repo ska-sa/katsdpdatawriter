@@ -7,6 +7,7 @@ from nose.tools import assert_equal, assert_count_equal, assert_is_instance, ass
 import asynctest
 from aiokatcp import SensorSet
 from katdal.chunkstore import ChunkStore
+import katsdpservices
 
 from ..spead_write import (Array, RechunkerGroup, io_sensors,
                            add_common_args, chunk_store_from_args)
@@ -129,11 +130,11 @@ class BadArguments(Exception):
     """Exception used in mock when replacing ArgumentParser.Error"""
 
 
-@mock.patch.object(argparse.ArgumentParser, 'error', side_effect=BadArguments)
+@mock.patch.object(katsdpservices.ArgumentParser, 'error', side_effect=BadArguments)
 class TestChunkStoreFromArgs:
     """Test both :meth:`.add_common_args` and :meth:`.chunk_store_from_args`"""
     def setup(self) -> None:
-        self.parser = argparse.ArgumentParser()
+        self.parser = katsdpservices.ArgumentParser()
         add_common_args(self.parser)
 
     def test_missing_args(self, error):
