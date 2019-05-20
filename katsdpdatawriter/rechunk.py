@@ -204,7 +204,7 @@ class Rechunker:
             await self.output(offset, item.value[full_idx])
         item.value = None   # Allow GC to reclaim memory now
 
-    async def _get_item(self, offset: Offset) -> Optional[_Item]:
+    async def _get_item(self, offset: Offset) -> Optional['_Item']:
         """Get the item that should hold the input chunk starting at `offset`.
 
         It returns ``None`` if the offset is too far in the past to be captured.
