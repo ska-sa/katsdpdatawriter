@@ -19,7 +19,7 @@ setup(
         "aiokatcp>=0.3.0",     # Needed for status_func
         "spead2>=1.8.0",       # Needed for async iteration
         "katsdptelstate",
-        "katsdpservices",
+        "katsdpservices[argparse,aiomonitor]",
         "katdal[s3credentials]",
         "attrs",
         "aiomonitor",

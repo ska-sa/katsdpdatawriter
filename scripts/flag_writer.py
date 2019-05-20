@@ -12,7 +12,6 @@ import logging
 import signal
 import asyncio
 
-import aiomonitor
 import katsdptelstate
 import katsdpservices
 
@@ -78,12 +77,6 @@ if __name__ == '__main__':
         dashboard = make_dashboard(server.sensors)
         start_dashboard(dashboard, args)
 
-    if args.aiomonitor:
-        with aiomonitor.start_monitor(loop=loop,
-                                      port=args.aiomonitor_port,
-                                      console_port=args.aioconsole_port,
-                                      locals=locals()):
-            loop.run_until_complete(run(loop, server))
-    else:
+    with katsdpservices.start_aiomonitor(loop, args, locals()):
         loop.run_until_complete(run(loop, server))
     loop.close()

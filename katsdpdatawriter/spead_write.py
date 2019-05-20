@@ -18,7 +18,6 @@ from typing import (Optional, Any, Sequence, Iterable,           # noqa: F401
 
 import numpy as np
 import attr
-import aiomonitor
 from aiokatcp import Sensor, SensorSet
 import spead2
 import spead2.recv.asyncio
@@ -642,14 +641,6 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                        help='Use O_DIRECT for writing to .npy files')
 
     group = parser.add_argument_group('Instrumentation options')
-    group.add_argument('--no-aiomonitor', dest='aiomonitor', action='store_false',
-                       help='Disable aiomonitor debugging server')
-    group.add_argument('--aiomonitor-port', type=int,
-                       default=aiomonitor.MONITOR_PORT, metavar='PORT',
-                       help='Port for aiomonitor [%(default)s]')
-    group.add_argument('--aioconsole-port', type=int,
-                       default=aiomonitor.CONSOLE_PORT, metavar='PORT',
-                       help='Port for aioconsole [%(default)s]')
     group.add_argument('--dashboard-port', type=int, metavar='PORT',
                        help='Port for dashboard [disabled]')
     group.add_argument('--external-hostname', default=socket.getfqdn(), metavar='HOSTNAME',
@@ -673,6 +664,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                         help='Threads to use for writing chunks [%(default)s]')
     parser.add_argument('--buffer-dumps', type=int, default=20, metavar='DUMPS',
                         help='Number of full dumps to buffer in write queue')
+    parser.add_aiomonitor_arguments()
     parser.add_argument('-p', '--port', type=int, metavar='N',
                         help='KATCP host port [%(default)s]')
     parser.add_argument('-a', '--host', default="", metavar='HOST',
