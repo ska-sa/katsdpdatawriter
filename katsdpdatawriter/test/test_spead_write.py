@@ -1,4 +1,3 @@
-import argparse
 from unittest import mock
 from concurrent.futures import ThreadPoolExecutor
 
