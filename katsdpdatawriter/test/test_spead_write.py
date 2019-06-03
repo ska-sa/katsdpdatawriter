@@ -47,11 +47,7 @@ class TestRechunkerGroup(asynctest.TestCase):
         self.chunk_store = mock.create_autospec(spec=ChunkStore, spec_set=True, instance=True)
         self.chunk_store.join = _join
 
-        try:
-            self.sensors = SensorSet()
-        except TypeError:
-            # Prior to aiokatcp 0.5 it needed a set of connections
-            self.sensors = SensorSet(set())
+        self.sensors = SensorSet()
         for sensor in io_sensors():
             self.sensors.add(sensor)
 

@@ -16,7 +16,7 @@ setup(
     ],
     setup_requires=["katversion"],
     install_requires=[
-        "aiokatcp>=0.3.0",     # Needed for status_func
+        "aiokatcp>=0.5.0",     # Needed for change to SensorSet constructor
         "spead2>=1.8.0",       # Needed for async iteration
         "katsdptelstate",
         "katsdpservices[argparse,aiomonitor]",
