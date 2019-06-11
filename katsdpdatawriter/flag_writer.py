@@ -192,7 +192,7 @@ class FlagWriterServer(DeviceServer):
         chunk_info = await rechunker_group.get_chunk_info()
         capture_stream_name = self._get_capture_stream_name(capture_block_id)
         telstate_capture = self._telstate.view(capture_stream_name)
-        telstate_capture.add('chunk_info', chunk_info, immutable=True)
+        telstate_capture['chunk_info'] = chunk_info
         logger.info("Written chunk information to telstate.", extra=extra)
 
     async def request_capture_done(self, ctx, capture_block_id: str) -> None:

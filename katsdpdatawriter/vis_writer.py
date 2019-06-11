@@ -155,7 +155,7 @@ class VisibilityWriterServer(DeviceServer):
 
             self.sensors['status'].value = Status.FINALISING
             view = self._telstate.view(capture_stream_name)
-            view.add('chunk_info', await rechunker_group.get_chunk_info(), immutable=True)
+            view['chunk_info'] = await rechunker_group.get_chunk_info()
             rechunker_group = None   # Tells except block not to clean up
             self._chunk_store.mark_complete(prefix)
             self.sensors['status'].value = Status.COMPLETE
@@ -178,8 +178,7 @@ class VisibilityWriterServer(DeviceServer):
             raise FailReply('Already capturing')
         self.sensors['status'].value = Status.WAIT_DATA
         self.sensors['device-status'].value = spead_write.DeviceStatus.OK
-        sep = self._telstate.SEPARATOR
-        capture_stream_name = sep.join((capture_block_id, self._output_name))
+        capture_stream_name = self._telstate.join(capture_block_id, self._output_name)
         self._rx = spead_write.make_receiver(
             self._endpoints, self._arrays, self._interface_address, self._ibv)
         self._capture_task = self.loop.create_task(self._do_capture(capture_stream_name, self._rx))

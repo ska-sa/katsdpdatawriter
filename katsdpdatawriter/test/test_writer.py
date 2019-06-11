@@ -19,9 +19,9 @@ class BaseTestWriterServer(asynctest.TestCase):
     def setup_telstate(cls, namespace: str) -> katsdptelstate.TelescopeState:
         telstate = katsdptelstate.TelescopeState().view(namespace)
         n_ants = 3
-        telstate.add('n_chans', 4096, immutable=True)
-        telstate.add('n_chans_per_substream', 1024, immutable=True)
-        telstate.add('n_bls', n_ants * (n_ants + 1) * 2, immutable=True)
+        telstate['n_chans'] = 4096
+        telstate['n_chans_per_substream'] = 1024
+        telstate['n_bls'] = n_ants * (n_ants + 1) * 2
         return telstate
 
     def setup_sleep(self) -> None:

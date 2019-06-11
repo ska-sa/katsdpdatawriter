@@ -75,7 +75,7 @@ class TestVisWriterServer(BaseTestWriterServer):
         self.addCleanup(shutil.rmtree, npy_path)
         self.chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(npy_path)
         self.telstate = self.setup_telstate('sdp_l0')
-        self.telstate.add('src_streams', ['i0_baseline_correlation_products'], immutable=True)
+        self.telstate['src_streams'] = ['i0_baseline_correlation_products']
         self.setup_sleep()
         self.setup_spead()
         self.server = await self.setup_server()

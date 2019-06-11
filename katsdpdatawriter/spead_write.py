@@ -514,14 +514,14 @@ def write_telstate(telstate: katsdptelstate.TelescopeState,
     """Write telstate information about output stream."""
     telstate_out = telstate.view(output_name)
     if output_name != input_name:
-        telstate_out.add('inherit', input_name, immutable=True)
+        telstate_out['inherit'] = input_name
         if rename_src:
             telstate_in = telstate.view(input_name)
             src_streams_in = telstate_in['src_streams']
             src_streams_out = [rename_src.get(stream, stream) for stream in src_streams_in]
-            telstate_out.add('src_streams', src_streams_out, immutable=True)
+            telstate_out['src_streams'] = src_streams_out
     if s3_endpoint_url is not None:
-        telstate_out.add('s3_endpoint_url', s3_endpoint_url, immutable=True)
+        telstate_out['s3_endpoint_url'] = s3_endpoint_url
 
 
 def make_receiver(endpoints: Sequence[Endpoint],

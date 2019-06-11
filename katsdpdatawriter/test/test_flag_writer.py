@@ -68,7 +68,7 @@ class TestFlagWriterServer(BaseTestWriterServer):
         self.addCleanup(shutil.rmtree, self.npy_path)
         self.chunk_store = NpyFileChunkStore(self.npy_path)
         self.telstate = self.setup_telstate('sdp_l1_flags')
-        self.telstate.add('src_streams', ['sdp_l0'], immutable=True)
+        self.telstate['src_streams'] = ['sdp_l0']
         self.chunk_channels = 128
         self.chunk_params = ChunkParams(self.telstate['n_bls'] * self.chunk_channels,
                                         self.chunk_channels)
