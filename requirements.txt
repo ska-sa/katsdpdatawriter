@@ -43,6 +43,6 @@ toolz
 tornado==5.1.1
 urllib3
 
-katdal @ git+https://git@github.com/ska-sa/katdal
-katsdpservices @ git+https://git@github.com/ska-sa/katsdpservices
-katsdptelstate @ git+https://git@github.com/ska-sa/katsdptelstate
+katdal @ git+https://github.com/ska-sa/katdal
+katsdpservices @ git+https://github.com/ska-sa/katsdpservices
+katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
