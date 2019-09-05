@@ -2,8 +2,8 @@ aioconsole
 aiokatcp
 aiomonitor
 async-timeout
-attrs==18.1.0
-bokeh==1.0.1
+attrs
+bokeh
 botocore
 certifi
 chardet
@@ -27,13 +27,13 @@ msgpack
 netifaces
 numba
 numpy
-packaging==18.0
-pillow==5.3.0
+packaging
+pillow
 pyephem
 pygelf
 pyparsing
 python-dateutil
-pyyaml==3.13
+pyyaml
 redis
 requests
 six
