@@ -7,8 +7,8 @@ tests_require = ['asynctest', 'nose']
 setup(
     name="katsdpdatawriter",
     description="MeerKAT data writer",
-    author="SARAO",
-    author_email="spt@ska.ac.za",
+    author="MeerKAT SDP team",
+    author_email="sdpdev+katsdpdatawriter@ska.ac.za",
     packages=find_packages(),
     scripts=[
         "scripts/flag_writer.py",
