@@ -697,7 +697,7 @@ def chunk_store_from_args(parser: argparse.ArgumentParser,
         chunk_store = katdal.chunkstore_npy.NpyFileChunkStore(
             args.npy_path, direct_write=args.direct_write)
     else:
-        chunk_store = katdal.chunkstore_s3.S3ChunkStore.from_url(
+        chunk_store = katdal.chunkstore_s3.S3ChunkStore(
             args.s3_endpoint_url,
             credentials=(args.s3_access_key, args.s3_secret_key),
             expiry_days=args.s3_expiry_days or 0)
