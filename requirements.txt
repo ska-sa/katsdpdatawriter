@@ -30,6 +30,7 @@ packaging
 pillow
 pyephem
 pygelf
+pyjwt
 pyparsing
 python-dateutil
 pyyaml
