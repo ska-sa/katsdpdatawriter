@@ -18,7 +18,7 @@ from typing import (Optional, Any, Sequence, Iterable,           # noqa: F401
 
 import numpy as np
 import attr
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import Sensor, SensorSet, SensorSampler
 import spead2
 import spead2.recv.asyncio
 import katdal.chunkstore
@@ -81,51 +81,56 @@ def _dtype_converter(dtype: Any) -> np.dtype:
 
 def io_sensors() -> Sequence[Sensor]:
     """Create input and output counter sensors."""
+    def make_sensor(*args, **kwargs) -> Sensor:
+        kwargs['auto_strategy'] = SensorSampler.Strategy.EVENT_RATE
+        kwargs['auto_strategy_parameters'] = (0.05, 10.0)
+        return Sensor(*args, **kwargs)
+
     return [
-        Sensor(
+        make_sensor(
             int, "input-incomplete-heaps-total",
             "Number of heaps dropped due to being incomplete. (prometheus: counter)",
             status_func=_warn_if_positive),
-        Sensor(
+        make_sensor(
             int, "input-too-old-heaps-total",
             "Number of heaps dropped because they are too late. (prometheus: counter)",
             status_func=_warn_if_positive),
-        Sensor(
+        make_sensor(
             int, "input-missing-heaps-total",
             "Number of gaps in the heaps seen. (prometheus: counter)",
             status_func=_warn_if_positive),
-        Sensor(
+        make_sensor(
             int, "input-bytes-total",
             "Number of payload bytes received in this session. (prometheus: counter)",
             "B"),
-        Sensor(
+        make_sensor(
             int, "input-heaps-total",
             "Number of input heaps captured in this session. (prometheus: counter)"),
-        Sensor(
+        make_sensor(
             int, "input-dumps-total",
             "Number of complete input dumps captured in this session. (prometheus: counter)"),
-        Sensor(
+        make_sensor(
             int, "output-bytes-total",
             "Number of payload bytes written to chunk store in this session. (prometheus: counter)",
             "B"),
-        Sensor(
+        make_sensor(
             int, "output-chunks-total",
             "Number of chunks written to chunk store in this session. (prometheus: counter)"),
-        Sensor(
+        make_sensor(
             float, "output-seconds-total",
             "Accumulated time spent writing chunks. (prometheus: counter)",
             "s"),
-        Sensor(
+        make_sensor(
             float, "output-seconds",
             "Time spent on the last chunk write.",
             "s"),
-        Sensor(
+        make_sensor(
             int, "active-chunks",
             "Number of chunks currently being written. (prometheus: gauge)"),
-        Sensor(
+        make_sensor(
             float, "queued-bytes",
             "Number of bytes that have been received but not yet written. (prometheus: gauge)"),
-        Sensor(
+        make_sensor(
             float, "max-queued-bytes",
             "Maximum value of queued-bytes sensor for this capture block. (prometheus: gauge)")
     ]
