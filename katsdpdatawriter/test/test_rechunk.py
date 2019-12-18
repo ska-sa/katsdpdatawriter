@@ -2,7 +2,7 @@ from unittest import mock
 from typing import List, Tuple   # noqa: F401
 
 import numpy as np
-from nose.tools import assert_equal, assert_raises, nottest
+from nose.tools import assert_equal, assert_raises
 import asynctest
 
 from .. import rechunk
@@ -44,24 +44,25 @@ def test_split_chunks_1d_misaligned() -> None:
 class MockRechunker(rechunk.Rechunker):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.calls = []   # type: List[Tuple[Offset, np.ndarray]]
+        self.calls = []   # type: List[Tuple[Offset, np.ndarray, np.ndarray]]
 
-    async def output(self, offset: Tuple[int, ...], value: np.ndarray) -> None:
-        self.calls.append((offset, value.copy()))
+    async def output(self, offset: Tuple[int, ...], value: np.ndarray, present: np.ndarray) -> None:
+        self.calls.append((offset, value.copy(), present.copy()))
 
 
-@nottest
-class BaseTestRechunker(asynctest.TestCase):
+class _BaseTestRechunker(asynctest.TestCase):
     def setup_data(self, in_chunks: Chunks, out_chunks: Chunks) -> None:
         self.r = MockRechunker('flags', in_chunks, out_chunks, 253, np.uint8)
         self.data = np.arange(64).reshape(4, 8, 2).astype(np.uint8)
         self.expected = np.full_like(self.data, 253, np.uint8)
+        self.present = np.zeros_like(self.data, np.bool_)
 
     async def send_chunk(self, offset: Tuple[int, ...]) -> None:
         idx = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, (1, 4, 2)))
         value = self.data[idx]
         await self.r.add(offset, value)
         self.expected[idx] = self.data[idx]
+        self.present[idx] = True
 
     def check_values(self) -> None:
         # Checks that the calls contain the expected values given the
@@ -71,6 +72,9 @@ class BaseTestRechunker(asynctest.TestCase):
             idx = tuple(slice(ofs, ofs + size) for ofs, size in zip(call[0], call[1].shape))
             expected = self.expected[idx]
             np.testing.assert_array_equal(expected, call[1])
+            present = self.present[idx]
+            present = present[(slice(None),) + (0,) * (present.ndim - 1)]
+            np.testing.assert_array_equal(present, call[2])
 
     async def test_add_bad_offset(self) -> None:
         with assert_raises(KeyError):
@@ -85,7 +89,7 @@ class BaseTestRechunker(asynctest.TestCase):
             await self.r.add((0, 0, 0), np.zeros((2, 4, 2), np.uint8))
 
 
-class TestRechunker(BaseTestRechunker):
+class TestRechunker(_BaseTestRechunker):
     def setUp(self) -> None:
         self.setup_data(((1,), (4, 4), (2,)), ((2,), (2, 2, 4), (2,)))
 
@@ -117,7 +121,7 @@ class TestRechunker(BaseTestRechunker):
                 'prefix': 'flags',
                 'chunks': ((2, 1), (2, 2, 4), (2,)),
                 'shape': (3, 8, 2),
-                'dtype': np.uint8
+                'dtype': '|u1'
             })
 
     async def test_end_full(self) -> None:
@@ -142,7 +146,7 @@ class TestRechunker(BaseTestRechunker):
                 'prefix': 'flags',
                 'chunks': ((2, 2), (2, 2, 4), (2,)),
                 'shape': (4, 8, 2),
-                'dtype': np.uint8
+                'dtype': '|u1'
             })
 
     async def test_reorder(self) -> None:
@@ -174,7 +178,7 @@ class TestRechunker(BaseTestRechunker):
                 'prefix': 'flags',
                 'chunks': ((2, 1), (2, 2, 4), (2,)),
                 'shape': (3, 8, 2),
-                'dtype': np.uint8
+                'dtype': '|u1'
             })
 
     def test_bad_in_chunks(self) -> None:
@@ -202,7 +206,7 @@ class TestRechunker(BaseTestRechunker):
             MockRechunker('foo', ((1,), (4, 4)), ((2,), (3, 5)), 253, np.uint8)
 
 
-class TestRechunkerNoAccum(BaseTestRechunker):
+class TestRechunkerNoAccum(_BaseTestRechunker):
     def setUp(self) -> None:
         self.setup_data(((1,), (4, 4), (2,)), ((1,), (2, 2, 4), (2,)))
 
@@ -228,5 +232,5 @@ class TestRechunkerNoAccum(BaseTestRechunker):
                 'prefix': 'flags',
                 'chunks': ((1, 1), (2, 2, 4), (2,)),
                 'shape': (2, 8, 2),
-                'dtype': np.uint8
+                'dtype': '|u1'
             })

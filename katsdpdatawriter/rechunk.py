@@ -149,9 +149,10 @@ class Rechunker:
         An intermediate chunk has the output chunk size in the time axis and
         the input chunk size in other axes.
         """
-        def __init__(self, offset: Offset, initial_value: np.ndarray) -> None:
+        def __init__(self, offset: Offset, initial_value: np.ndarray, present: bool) -> None:
             self.offset = offset
             self.value = initial_value
+            self.present = np.full(initial_value.shape[:1], present, np.bool_)
 
         def add(self, offset: Offset, value: np.ndarray) -> None:
             """Add a new input chunk."""
@@ -160,6 +161,12 @@ class Rechunker:
                 raise ValueError('value has wrong shape')
             rel = offset[0] - self.offset[0]
             self.value[rel:rel+1] = value
+            self.present[rel] = True
+
+        def truncate(self, times: int) -> None:
+            if times < self.value.shape[0]:
+                self.value = self.value[:times]
+                self.present = self.present[:times]
 
     def __init__(self, name: str,
                  in_chunks: Chunks,
@@ -201,7 +208,7 @@ class Rechunker:
         for idx in itertools.product(*slices):
             full_idx = np.index_exp[0:len(item.value)] + idx
             offset = tuple(s.start + offset for s, offset in zip(full_idx, item.offset))
-            await self.output(offset, item.value[full_idx])
+            await self.output(offset, item.value[full_idx], item.present)
         item.value = None   # Allow GC to reclaim memory now
 
     async def _get_item(self, offset: Offset) -> Optional['_Item']:
@@ -218,7 +225,7 @@ class Rechunker:
                 await self._flush(item)
             shape = self._item_shape(offset)
             initial_value = np.full(shape, self.fill_value, self.dtype)
-            item = self._Item(item_offset, initial_value)
+            item = self._Item(item_offset, initial_value, False)
             self._items[key] = item
         elif item.offset[0] > item_offset[0]:
             self.out_of_order(offset[0], item.offset[0])
@@ -261,7 +268,7 @@ class Rechunker:
             value = np.asarray(value).astype(self.dtype, copy=True)
             if value.shape != shape:
                 raise ValueError('value has wrong shape')
-            item = self._Item(offset, value)
+            item = self._Item(offset, value, True)
             await self._flush(item)
         self._n_dumps = max(self._n_dumps, offset[0] + 1)
 
@@ -270,8 +277,7 @@ class Rechunker:
         for item in self._items.values():
             # Truncate to last seen dump
             times = self._n_dumps - item.offset[0]
-            if times < item.value.shape[0]:
-                item.value = item.value[:times]
+            item.truncate(times)
             await self._flush(item)
         self._items.clear()
 
@@ -303,10 +309,21 @@ class Rechunker:
             'chunks': self._get_chunks()
         }
 
-    async def output(self, offset: Offset, value: np.ndarray) -> None:
+    async def output(self, offset: Offset, value: np.ndarray, present: np.ndarray) -> None:
         """Called with each output chunk.
 
         It is safe for the callee to save a reference to `value`: it is
         guaranteed that this class will not reuse the memory.
+
+        Parameters
+        ----------
+        offset
+            Position of the start of this chunk
+        value
+            Chunk data
+        present
+            1D boolean array indexed by time, indicating which of the input
+            chunks that were accumulated into the output chunks are actually
+            present (rather than replaced by the fill value).
         """
         raise NotImplementedError      # pragma: nocover
