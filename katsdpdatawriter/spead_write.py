@@ -293,13 +293,14 @@ class ChunkStoreRechunker(rechunk.Rechunker):
             self.sensors['output-seconds-total'].value += elapsed
             self.sensors['output-seconds'].value = elapsed
 
-    async def output(self, offset: Offset, value: np.ndarray) -> None:
+    async def output(self, offset: Offset, value: np.ndarray, present: np.ndarray) -> None:
         slices = tuple(slice(ofs, ofs + size) for ofs, size in zip(offset, value.shape))
         await self.executor_queue_space.acquire(value.nbytes)
         future = asyncio.ensure_future(
             self._loop.run_in_executor(self.executor, self._put_chunk, slices, value))
         self._futures.add(future)
-        future.add_done_callback(functools.partial(self._update_stats, value.nbytes))
+        nbytes = value.nbytes * np.sum(present) // len(present)
+        future.add_done_callback(functools.partial(self._update_stats, nbytes))
 
     def out_of_order(self, received: int, seen: int) -> None:
         self.sensors['input-too-old-heaps-total'].value += 1
