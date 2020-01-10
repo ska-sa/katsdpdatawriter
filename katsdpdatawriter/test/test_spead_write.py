@@ -117,7 +117,7 @@ class TestRechunkerGroup(asynctest.TestCase):
                     'prefix': 'prefix',
                     'chunks': ((2,), (2, 2, 2, 2)),
                     'shape': (2, 8),
-                    'dtype': '<f4'      # TODO: assumes little-endian hardware
+                    'dtype': np.dtype(np.float32).str
                 }
             })
 
