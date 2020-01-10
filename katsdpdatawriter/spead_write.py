@@ -128,10 +128,10 @@ def io_sensors() -> Sequence[Sensor]:
             int, "active-chunks",
             "Number of chunks currently being written. (prometheus: gauge)"),
         make_sensor(
-            float, "queued-bytes",
+            int, "queued-bytes",
             "Number of bytes that have been received but not yet written. (prometheus: gauge)"),
         make_sensor(
-            float, "max-queued-bytes",
+            int, "max-queued-bytes",
             "Maximum value of queued-bytes sensor for this capture block. (prometheus: gauge)")
     ]
 
