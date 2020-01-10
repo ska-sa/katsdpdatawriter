@@ -128,10 +128,10 @@ def io_sensors() -> Sequence[Sensor]:
             int, "active-chunks",
             "Number of chunks currently being written. (prometheus: gauge)"),
         make_sensor(
-            float, "queued-bytes",
+            int, "queued-bytes",
             "Number of bytes that have been received but not yet written. (prometheus: gauge)"),
         make_sensor(
-            float, "max-queued-bytes",
+            int, "max-queued-bytes",
             "Maximum value of queued-bytes sensor for this capture block. (prometheus: gauge)")
     ]
 
@@ -271,7 +271,8 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         end = time.monotonic()
         return end - start
 
-    def _update_stats(self, nbytes: int, future: 'asyncio.Future[float]') -> None:
+    def _update_stats(self, nbytes: int, nbytes_present: int,
+                      future: 'asyncio.Future[float]') -> None:
         """Done callback for a future running :meth:`_put_chunk`.
 
         This is run on the event loop, so can safely update sensors. It also
@@ -279,7 +280,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         """
         self._futures.remove(future)
         self.executor_queue_space.release(nbytes)
-        self.sensors['queued-bytes'].value -= nbytes
+        self.sensors['queued-bytes'].value -= nbytes_present
         try:
             elapsed = future.result()
         except asyncio.CancelledError:
@@ -289,7 +290,7 @@ class ChunkStoreRechunker(rechunk.Rechunker):
             self.sensors['device-status'].value = DeviceStatus.FAIL
         else:
             self.sensors['output-chunks-total'].value += 1
-            self.sensors['output-bytes-total'].value += nbytes
+            self.sensors['output-bytes-total'].value += nbytes_present
             self.sensors['output-seconds-total'].value += elapsed
             self.sensors['output-seconds'].value = elapsed
 
@@ -299,8 +300,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         future = asyncio.ensure_future(
             self._loop.run_in_executor(self.executor, self._put_chunk, slices, value))
         self._futures.add(future)
-        nbytes = value.nbytes * np.sum(present) // len(present)
-        future.add_done_callback(functools.partial(self._update_stats, nbytes))
+        nbytes_present = value.nbytes * np.sum(present) // len(present)
+        callback = functools.partial(self._update_stats, value.nbytes, nbytes_present)
+        future.add_done_callback(callback)
 
     def out_of_order(self, received: int, seen: int) -> None:
         self.sensors['input-too-old-heaps-total'].value += 1

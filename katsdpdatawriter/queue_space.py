@@ -16,6 +16,11 @@ class QueueSpace:
         self._value = value
         self._waiters = deque()      # type: deque
 
+    @property
+    def value(self) -> int:
+        """Currently available space."""
+        return self._value
+
     async def acquire(self, value: int) -> bool:
         if value <= self._value:
             self._value -= value

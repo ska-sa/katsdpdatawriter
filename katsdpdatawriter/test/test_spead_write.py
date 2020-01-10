@@ -117,9 +117,23 @@ class TestRechunkerGroup(asynctest.TestCase):
                     'prefix': 'prefix',
                     'chunks': ((2,), (2, 2, 2, 2)),
                     'shape': (2, 8),
-                    'dtype': '<f4'      # TODO: assumes little-endian hardware
+                    'dtype': np.dtype(np.float32).str
                 }
             })
+
+    async def test_accounting(self) -> None:
+        qs = self.executor_queue_space
+        qsize = qs.value
+        sensor = self.sensors['queued-bytes']
+        await self.add_chunks((0, 0))
+        assert_equal(sensor.value, 24)      # 8x uint8 + 4x float32
+        assert_equal(qsize - qs.value, 8)   # 8x uint8 (the 4x float32 is still accumulating)
+        await self.add_chunks((1, 0))
+        await self.add_chunks((0, 4))
+        await self.r.get_chunk_info()
+        # Everything should have been written
+        assert_equal(sensor.value, 0)
+        assert_equal(qsize - qs.value, 0)
 
 
 # SpeadWriter gets exercised via its derived classes
