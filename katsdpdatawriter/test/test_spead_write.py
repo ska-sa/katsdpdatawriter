@@ -165,6 +165,12 @@ class TestChunkStoreFromArgs:
                 ['--npy-path=/doesnotexist']))
         error.assert_called_with('Specified --npy-path (/doesnotexist) does not exist.')
 
+    def test_npy_and_s3_write(self, error):
+        with assert_raises(BadArguments):
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--npy-path=/', '--s3-write-url=https://s3.invalid/']))
+        error.assert_called_with('--s3-write-url and --npy-path cannot be used together')
+
     def test_npy(self, error):
         with mock.patch('katdal.chunkstore_npy.NpyFileChunkStore') as m:
             chunk_store_from_args(self.parser, self.parser.parse_args(
@@ -191,6 +197,15 @@ class TestChunkStoreFromArgs:
                  '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS',
                  '--s3-expiry-days=7']))
         m.assert_called_with('https://s3.invalid', credentials=('ACCESS', 'S3CR3T'), expiry_days=7)
+
+    def test_s3_write_url(self, error):
+        with mock.patch('katdal.chunkstore_s3.S3ChunkStore') as m:
+            chunk_store_from_args(self.parser, self.parser.parse_args(
+                ['--s3-endpoint-url=https://s3.invalid',
+                 '--s3-write-url=https://s3.write.invalid',
+                 '--s3-secret-key=S3CR3T', '--s3-access-key', 'ACCESS']))
+        m.assert_called_with('https://s3.write.invalid', credentials=('ACCESS', 'S3CR3T'),
+                             expiry_days=0)
 
     def test_rename_src(self, error):
         args = self.parser.parse_args([
