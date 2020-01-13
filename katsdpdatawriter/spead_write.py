@@ -639,13 +639,15 @@ def add_common_args(parser: katsdpservices.ArgumentParser) -> None:
                        help='Write NPY files to this directory instead of '
                             'directly to object store')
     group.add_argument('--s3-endpoint-url', metavar='URL',
-                       help='URL of S3 gateway to Ceph cluster')
+                       help='URL of S3 endpoint')
     group.add_argument('--s3-access-key', metavar='KEY',
                        help='Access key for S3')
     group.add_argument('--s3-secret-key', metavar='KEY',
                        help='Secret key for S3')
     group.add_argument('--s3-expiry-days', type=int, metavar='DAYS',
                        help='Days after which to expire the data')
+    group.add_argument('--s3-write-url', metavar='URL',
+                       help='URL of S3 endpoint used for writing, overriding --s3-endpoint-url')
     group.add_argument('--direct-write', action='store_true',
                        help='Use O_DIRECT for writing to .npy files')
 
@@ -698,6 +700,8 @@ def chunk_store_from_args(parser: argparse.ArgumentParser,
                 # Real parser.error kills the process, but the unit tests mock
                 # it and so we want to ensure that we don't carry on.
     else:
+        if args.s3_write_url:
+            parser.error("--s3-write-url and --npy-path cannot be used together")
         if not os.path.isdir(args.npy_path):
             parser.error("Specified --npy-path ({}) does not exist.".format(args.npy_path))
 
@@ -706,7 +710,7 @@ def chunk_store_from_args(parser: argparse.ArgumentParser,
             args.npy_path, direct_write=args.direct_write)
     else:
         chunk_store = katdal.chunkstore_s3.S3ChunkStore(
-            args.s3_endpoint_url,
+            args.s3_write_url or args.s3_endpoint_url,
             credentials=(args.s3_access_key, args.s3_secret_key),
             expiry_days=args.s3_expiry_days or 0)
     return chunk_store
