@@ -10,7 +10,6 @@ chardet
 cityhash
 dask
 decorator
-defusedxml
 docutils
 fakeredis
 future
