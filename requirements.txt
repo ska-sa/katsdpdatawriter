@@ -21,7 +21,7 @@ jinja2
 jmespath
 katversion
 llvmlite
-markupsafe==1.0
+markupsafe
 msgpack
 netifaces
 numba
@@ -40,7 +40,7 @@ six
 spead2
 terminaltables
 toolz
-tornado==5.1.1
+tornado
 urllib3
 
 katdal @ git+https://github.com/ska-sa/katdal
