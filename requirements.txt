@@ -11,7 +11,7 @@ cityhash
 dask
 decorator
 docutils
-fakeredis
+ephem
 future
 h5py
 hiredis
