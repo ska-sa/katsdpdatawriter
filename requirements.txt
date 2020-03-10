@@ -16,7 +16,6 @@ future
 h5py
 hiredis
 idna
-ipaddress
 jinja2
 jmespath
 katversion
