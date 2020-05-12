@@ -171,7 +171,7 @@ class VisibilityWriterServer(DeviceServer):
             # Shouldn't be any pending tasks, because get_chunk_info should wait
             executor.shutdown()
 
-    async def request_capture_init(self, ctx, capture_block_id: str = None) -> None:
+    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start listening for L0 data"""
         if self._capture_task is not None:
             logger.info("Ignoring capture_init: already capturing")
