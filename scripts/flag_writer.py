@@ -65,10 +65,11 @@ if __name__ == '__main__':
 
     chunk_store = chunk_store_from_args(parser, args)
     loop = asyncio.get_event_loop()
+    # The type: ignore below is because mypy doesn't know that parser.error never returns
     server = FlagWriterServer(args.host, args.port, loop, args.flags_spead,
                               args.flags_interface, args.flags_ibv,
                               chunk_store, ChunkParams.from_args(args),
-                              args.telstate,
+                              args.telstate,     # type: ignore
                               args.flags_name,
                               args.new_name if args.new_name is not None else args.flags_name,
                               args.rename_src, args.s3_endpoint_url,
