@@ -44,14 +44,14 @@ class BaseTestWriterServer(asynctest.TestCase):
         self.endpoints = [Endpoint('239.102.254.{}'.format(i), 7148) for i in range(4)]
         self.inproc_queues = {endpoint: spead2.InprocQueue() for endpoint in self.endpoints}
         tx_pool = spead2.ThreadPool()
-        self.tx = [spead2.send.asyncio.InprocStream(tx_pool, self.inproc_queues[endpoint])
+        self.tx = [spead2.send.asyncio.InprocStream(tx_pool, [self.inproc_queues[endpoint]])
                    for endpoint in self.endpoints]
         patcher = mock.patch('spead2.recv.asyncio.Stream.add_udp_reader', add_udp_reader)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        async def get(stream, loop=None):
-            heap = await orig_get(stream, loop)
+        async def get(stream):
+            heap = await orig_get(stream)
             self.received_heaps.release()
             return heap
 

@@ -36,7 +36,7 @@ pyyaml
 redis
 requests
 six
-spead2
+spead2==3.0.0
 terminaltables
 toolz
 tornado
