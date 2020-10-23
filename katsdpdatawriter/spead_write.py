@@ -581,8 +581,8 @@ def make_receiver(endpoints: Sequence[Endpoint],
         assert interface_address is not None, "Interface address is required when using ibverbs"
         endpoint_tuples = [(endpoint.host, endpoint.port) for endpoint in endpoints]
         rx.add_udp_ibv_reader(
-            endpoint_tuples,
             spead2.recv.UdpIbvConfig(
+                endpoints=endpoint_tuples,
                 interface_address=interface_address,
                 buffer_size=64 * 1024**2
             )
