@@ -17,7 +17,7 @@ setup(
     setup_requires=["katversion"],
     install_requires=[
         "aiokatcp>=0.7.0",     # Needed for auto_strategy
-        "spead2>=1.8.0,<3",    # 1.8 needed for async iteration
+        "spead2>=3.0.0",
         "katsdptelstate",
         "katsdpservices[argparse,aiomonitor]",
         "katdal[s3credentials]",

@@ -559,23 +559,34 @@ def make_receiver(endpoints: Sequence[Endpoint],
 
     max_heaps = max_heaps_per_substream * n_substreams
     ring_heaps = ring_heaps_per_substream * n_substreams
-    rx = spead2.recv.asyncio.Stream(spead2.ThreadPool(),
-                                    max_heaps=max_heaps,
-                                    ring_heaps=ring_heaps,
-                                    contiguous_only=False)
     n_memory_buffers = max_heaps + ring_heaps + 2
     heap_size = sum(a.nbytes // a.substreams for a in arrays)
     memory_pool = spead2.MemoryPool(heap_size, heap_size + 4096,
                                     n_memory_buffers, n_memory_buffers)
-    rx.set_memory_pool(memory_pool)
-    rx.set_memcpy(spead2.MEMCPY_NONTEMPORAL)
-    rx.stop_on_stop_item = False
+    rx = spead2.recv.asyncio.Stream(
+        spead2.ThreadPool(),
+        spead2.recv.StreamConfig(
+            max_heaps=max_heaps,
+            memory_allocator=memory_pool,
+            memcpy=spead2.MEMCPY_NONTEMPORAL,
+            stop_on_stop_item=False
+        ),
+        spead2.recv.RingStreamConfig(
+            heaps=ring_heaps,
+            contiguous_only=False
+        )
+    )
     if ibv:
         # The main scripts check this; the assert keeps mypy happy
         assert interface_address is not None, "Interface address is required when using ibverbs"
         endpoint_tuples = [(endpoint.host, endpoint.port) for endpoint in endpoints]
-        rx.add_udp_ibv_reader(endpoint_tuples, interface_address,
-                              buffer_size=64 * 1024**2)
+        rx.add_udp_ibv_reader(
+            spead2.recv.UdpIbvConfig(
+                endpoints=endpoint_tuples,
+                interface_address=interface_address,
+                buffer_size=64 * 1024**2
+            )
+        )
     else:
         for endpoint in endpoints:
             if interface_address is not None:
