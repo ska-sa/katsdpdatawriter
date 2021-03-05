@@ -22,7 +22,6 @@ setup(
         "katsdpservices[argparse,aiomonitor]",
         "katdal[s3credentials]",
         "attrs",
-        "aiomonitor",
         "numpy",
         "bokeh"
     ],
