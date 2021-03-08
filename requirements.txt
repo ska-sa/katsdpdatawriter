@@ -1,48 +1,13 @@
-aioconsole
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+
 aiokatcp
-aiomonitor
-async-timeout
 attrs
 bokeh
-botocore
-certifi
-chardet
-cityhash
-dask
-decorator
-docutils
-ephem
-future
-h5py
-hiredis
-idna
-jinja2
-jmespath
-katversion
-llvmlite
-markupsafe
-msgpack
-netifaces
-numba
+hiredis              # Speeds up katsdptelstate
 numpy
-packaging
-pillow
-pyephem
-pygelf
-pyjwt
-pyparsing
-python-dateutil
-pyyaml
-redis
-requests
-six
 spead2
-terminaltables
-toolz
-tornado
-urllib3
 
-katdal @ git+https://github.com/ska-sa/katdal
+katdal[s3credentials] @ git+https://github.com/ska-sa/katdal
 katpoint @ git+https://github.com/ska-sa/katpoint
-katsdpservices @ git+https://github.com/ska-sa/katsdpservices
+katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
