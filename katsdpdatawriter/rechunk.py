@@ -3,6 +3,7 @@ import itertools
 from typing import Tuple, Dict, Any, Optional
 
 import numpy as np
+import numpy.lib.format as _np_lib_format  # noqa: F401  # Make mypy happy with np.lib.format
 
 
 logger = logging.getLogger(__name__)
@@ -151,11 +152,12 @@ class Rechunker:
         """
         def __init__(self, offset: Offset, initial_value: np.ndarray, present: bool) -> None:
             self.offset = offset
-            self.value = initial_value
+            self.value: Optional[np.ndarray] = initial_value
             self.present = np.full(initial_value.shape[:1], present, np.bool_)
 
         def add(self, offset: Offset, value: np.ndarray) -> None:
             """Add a new input chunk."""
+            assert self.value is not None
             assert offset[1:] == self.offset[1:]
             if value.shape[1:] != self.value.shape[1:] or value.shape[0] != 1:
                 raise ValueError('value has wrong shape')
@@ -164,6 +166,7 @@ class Rechunker:
             self.present[rel] = True
 
         def truncate(self, times: int) -> None:
+            assert self.value is not None
             if times < self.value.shape[0]:
                 self.value = self.value[:times]
                 self.present = self.present[:times]
@@ -206,6 +209,7 @@ class Rechunker:
         """Send `item` to :meth:`output`."""
         slices = tuple(s[ofs] for ofs, s in zip(item.offset[1:], self._split_chunks))
         for idx in itertools.product(*slices):
+            assert item.value is not None
             full_idx = np.index_exp[0:len(item.value)] + idx
             offset = tuple(s.start + offset for s, offset in zip(full_idx, item.offset))
             await self.output(offset, item.value[full_idx], item.present)
