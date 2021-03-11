@@ -57,7 +57,7 @@ class BaseTestWriterServer(asynctest.TestCase):
 
         self.received_heaps = asyncio.Semaphore(value=0, loop=self.loop)
         orig_get = spead2.recv.asyncio.Stream.get
-        patcher = mock.patch('spead2.recv.asyncio.Stream.get', get)
+        patcher = mock.patch('spead2.recv.asyncio.Stream.get', get)   # type: ignore
         patcher.start()
         self.addCleanup(patcher.stop)
 
