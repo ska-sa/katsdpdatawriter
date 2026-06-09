@@ -13,10 +13,15 @@ RUN uv pip compile /tmp/install/requirements.txt \
     uv pip sync /tmp/install/requirements.lock --strict
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpdatawriter
-WORKDIR /tmp/install/katsdpdatawriter
-RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
+#WORKDIR /tmp/install/katsdpdatawriter
+#RUN python ./setup.py clean
+#RUN pip install --no-deps .
+#RUN pip check
+RUN cd /tmp/install/katsdpdatawriter && \
+    python ./setup.py clean && \
+    uv pip install --no-deps . && \
+    uv pip check
+    
 
 #######################################################################
 
