@@ -266,7 +266,9 @@ class ChunkStoreRechunker(rechunk.Rechunker):
         self._loop.call_soon_threadsafe(increment_active_chunks)
         try:
             self.chunk_store.put_chunk(self.name, slices, value)
-            logger.info('Putting chunk {0} slice {1} into chunkstore'.format(self.name, slices))
+            chunk_name, chunk_shape = self.chunk_store.chunk_metadata(self.name, slices)
+            logger.info('Putting chunk {0} with shape'
+                        '{1} into chunkstore'.format(chunk_name, chunk_shape))
         finally:
             self._loop.call_soon_threadsafe(decrement_active_chunks)
         end = time.monotonic()
