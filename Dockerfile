@@ -1,6 +1,6 @@
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:uvpipjammy AS build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:uvpipjammy as build
 
 # Switch to Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
