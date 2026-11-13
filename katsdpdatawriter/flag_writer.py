@@ -202,8 +202,10 @@ class FlagWriterServer(DeviceServer):
         """
         if capture_block_id not in self._capture_block_state:
             raise FailReply("Specified capture block ID {} is unknown.".format(capture_block_id))
-        # Allow some time for stragglers to appear
-        await asyncio.sleep(5, loop=self.loop)
+        # Allow some time for stragglers to appear 
+        # For python 3.10 asyncio.sleep does need the loop argument anymore because 
+        # the running event loop automatically
+        await asyncio.sleep(5)
         await self._write_telstate_meta(capture_block_id)
         self._mark_cbid_complete(capture_block_id)
 
