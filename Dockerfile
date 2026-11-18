@@ -8,9 +8,10 @@ ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install dependencies
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
-#RUN install_pinned.py -r /tmp/install/requirements.txt
+
 RUN uv pip compile /tmp/install/requirements.txt \
-    -o /tmp/install/requirements.lock && \
+        -c /home/kat/docker-base/base-requirements.lock \
+        -o /tmp/install/requirements.lock && \
     uv pip install --no-deps -r /tmp/install/requirements.lock && \
     uv pip check
 # Install the current package
