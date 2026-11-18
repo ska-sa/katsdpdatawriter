@@ -51,6 +51,8 @@ class MockRechunker(rechunk.Rechunker):
 
 
 class _BaseTestRechunker(asynctest.TestCase):
+    __test__ = False
+
     def setup_data(self, in_chunks: Chunks, out_chunks: Chunks) -> None:
         self.r = MockRechunker('flags', in_chunks, out_chunks, 253, np.uint8)
         self.data = np.arange(64).reshape(4, 8, 2).astype(np.uint8)
@@ -90,6 +92,8 @@ class _BaseTestRechunker(asynctest.TestCase):
 
 
 class TestRechunker(_BaseTestRechunker):
+    __test__ = True
+
     def setUp(self) -> None:
         self.setup_data(((1,), (4, 4), (2,)), ((2,), (2, 2, 4), (2,)))
 
@@ -207,6 +211,8 @@ class TestRechunker(_BaseTestRechunker):
 
 
 class TestRechunkerNoAccum(_BaseTestRechunker):
+    __test__ = True
+
     def setUp(self) -> None:
         self.setup_data(((1,), (4, 4), (2,)), ((1,), (2, 2, 4), (2,)))
 
