@@ -15,7 +15,7 @@ from ..queue_space import QueueSpace
 
 
 class TestArray:
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         self.array = Array(
             'foo',
             in_chunks=((1,), (4, 4, 4), (2, 2)),
@@ -146,7 +146,7 @@ class BadArguments(Exception):
 @mock.patch.object(katsdpservices.ArgumentParser, 'error', side_effect=BadArguments)
 class TestChunkStoreFromArgs:
     """Test both :meth:`.add_common_args` and :meth:`.chunk_store_from_args`"""
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         self.parser = katsdpservices.ArgumentParser()
         add_common_args(self.parser)
 
