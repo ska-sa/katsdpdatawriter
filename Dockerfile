@@ -1,20 +1,26 @@
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build AS build
 
 # Switch to Python 3 environment
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+# uv is installed in ~/.local/bin in the base image
+ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install dependencies
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
-RUN install_pinned.py -r /tmp/install/requirements.txt
 
+RUN uv pip compile /tmp/install/requirements.txt \
+        -c /home/kat/docker-base/base-requirements.lock \
+        -o /tmp/install/requirements.lock && \
+    uv pip install --no-deps -r /tmp/install/requirements.lock && \
+    uv pip check
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpdatawriter
-WORKDIR /tmp/install/katsdpdatawriter
-RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
+
+RUN cd /tmp/install/katsdpdatawriter && \
+    python3 ./setup.py clean   && \
+    uv pip install --no-deps . && \
+    uv pip check
 
 #######################################################################
 
